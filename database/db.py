@@ -11,9 +11,23 @@ async def init_db():
                 username TEXT,
                 full_name TEXT,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                total_downloads INTEGER DEFAULT 0
+                total_downloads INTEGER DEFAULT 0,
+                visits_count INTEGER DEFAULT 1,
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migratsiya: yangi ustunlarni tekshirib qo'shish
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN visits_count INTEGER DEFAULT 1")
+        except Exception:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN last_active TIMESTAMP DEFAULT NULL")
+            await db.execute("UPDATE users SET last_active = joined_at WHERE last_active IS NULL")
+        except Exception:
+            pass
+        await db.commit()
         await db.execute("""
             CREATE TABLE IF NOT EXISTS downloads_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,11 +99,13 @@ async def set_cached_file(source_url: str, file_id: str, media_type: str = "audi
 async def add_user(user_id: int, username: str | None, full_name: str | None):
     async with aiosqlite.connect(DATABASE_PATH) as db:
         await db.execute("""
-            INSERT INTO users (id, username, full_name)
-            VALUES (?, ?, ?)
+            INSERT INTO users (id, username, full_name, visits_count, last_active)
+            VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
             ON CONFLICT(id) DO UPDATE SET
-                username = excluded.username,
-                full_name = excluded.full_name
+                username = COALESCE(excluded.username, users.username),
+                full_name = COALESCE(excluded.full_name, users.full_name),
+                visits_count = COALESCE(users.visits_count, 0) + 1,
+                last_active = CURRENT_TIMESTAMP
         """, (user_id, username, full_name))
         await db.commit()
 
@@ -223,10 +239,36 @@ async def get_all_users(limit: int = 50) -> list[dict]:
     async with aiosqlite.connect(DATABASE_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("""
-            SELECT id, username, full_name, joined_at, total_downloads
+            SELECT id, username, full_name, joined_at, total_downloads, visits_count, last_active
             FROM users
-            ORDER BY joined_at DESC
+            ORDER BY last_active DESC
             LIMIT ?
         """, (limit,)) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+async def find_user(query: str) -> Optional[dict]:
+    clean_q = query.strip().lstrip("@")
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if clean_q.isdigit():
+            async with db.execute("""
+                SELECT id, username, full_name, joined_at, total_downloads, visits_count, last_active
+                FROM users
+                WHERE id = ? OR username = ?
+            """, (int(clean_q), clean_q)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return dict(row)
+
+        async with db.execute("""
+            SELECT id, username, full_name, joined_at, total_downloads, visits_count, last_active
+            FROM users
+            WHERE LOWER(username) = LOWER(?) OR LOWER(full_name) LIKE LOWER(?)
+            ORDER BY last_active DESC
+            LIMIT 1
+        """, (clean_q, f"%{clean_q}%")) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return dict(row)
+    return None
