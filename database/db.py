@@ -178,11 +178,18 @@ async def get_stats() -> dict:
             row = await cursor.fetchone()
             total_users = row[0] if row else 0
 
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        async with db.execute("""
+            SELECT COUNT(*) FROM users 
+            WHERE date(joined_at) = date(?)
+        """, (today_str,)) as cursor:
+            row = await cursor.fetchone()
+            today_users = row[0] if row else 0
+
         async with db.execute("SELECT COUNT(*) FROM downloads_log WHERE status = 'success'") as cursor:
             row = await cursor.fetchone()
             total_downloads = row[0] if row else 0
 
-        today_str = datetime.now().strftime("%Y-%m-%d")
         async with db.execute("""
             SELECT COUNT(*) FROM downloads_log 
             WHERE status = 'success' AND date(created_at) = date(?)
@@ -200,6 +207,7 @@ async def get_stats() -> dict:
 
         return {
             "total_users": total_users,
+            "today_users": today_users,
             "total_downloads": total_downloads,
             "today_downloads": today_downloads,
             "platforms": dict(platforms)
@@ -210,3 +218,15 @@ async def get_all_user_ids() -> list[int]:
         async with db.execute("SELECT id FROM users") as cursor:
             rows = await cursor.fetchall()
             return [r[0] for r in rows]
+
+async def get_all_users(limit: int = 50) -> list[dict]:
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT id, username, full_name, joined_at, total_downloads
+            FROM users
+            ORDER BY joined_at DESC
+            LIMIT ?
+        """, (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

