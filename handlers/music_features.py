@@ -13,7 +13,7 @@ from database import (
 from keyboards import (
     store_url_in_cache,
     get_song_info,
-    get_song_action_keyboard,
+    get_audio_sent_keyboard,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,10 +117,10 @@ async def handle_favorite_toggle(callback: types.CallbackQuery):
     if action == "add":
         await add_to_favorites(user_id, title, performer, url)
         await callback.answer("❤️ Sevimlilarga qo'shildi!", show_alert=False)
-        kb = get_song_action_keyboard(song_key, is_fav=True)
+        kb = get_audio_sent_keyboard(song_key, is_fav=True)
         await callback.message.edit_reply_markup(reply_markup=kb)
     elif action == "del":
         await remove_from_favorites(user_id, url)
         await callback.answer("💔 Sevimlilardan o'chirildi!", show_alert=False)
-        kb = get_song_action_keyboard(song_key, is_fav=False)
+        kb = get_audio_sent_keyboard(song_key, is_fav=False)
         await callback.message.edit_reply_markup(reply_markup=kb)

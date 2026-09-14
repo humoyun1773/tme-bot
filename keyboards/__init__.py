@@ -3,9 +3,11 @@ from .inline import (
     get_url_from_cache,
     store_song_info,
     get_song_info,
+    store_search_cache,
+    get_search_cache,
     get_quality_keyboard,
     get_search_results_keyboard,
-    get_song_action_keyboard,
+    get_audio_sent_keyboard,
     get_retry_keyboard,
     format_duration
 )
@@ -15,9 +17,11 @@ __all__ = [
     "get_url_from_cache",
     "store_song_info",
     "get_song_info",
+    "store_search_cache",
+    "get_search_cache",
     "get_quality_keyboard",
     "get_search_results_keyboard",
-    "get_song_action_keyboard",
+    "get_audio_sent_keyboard",
     "get_retry_keyboard",
     "format_duration"
 ]

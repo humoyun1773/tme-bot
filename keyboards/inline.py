@@ -4,9 +4,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 URL_CACHE: Dict[str, str] = {}
 SONG_INFO_CACHE: Dict[str, Dict[str, Any]] = {}
+SEARCH_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def store_url_in_cache(url: str) -> str:
-    """URL ni keshda saqlab, qisqa kalit qaytaradi."""
     key = uuid.uuid4().hex[:10]
     URL_CACHE[key] = url
     if len(URL_CACHE) > 1000:
@@ -15,7 +15,6 @@ def store_url_in_cache(url: str) -> str:
     return key
 
 def get_url_from_cache(key: str) -> Optional[str]:
-    """Qisqa kalit bo'yicha URL ni oladi."""
     return URL_CACHE.get(key)
 
 def store_song_info(info: Dict[str, Any]) -> str:
@@ -29,6 +28,17 @@ def store_song_info(info: Dict[str, Any]) -> str:
 def get_song_info(key: str) -> Optional[Dict[str, Any]]:
     return SONG_INFO_CACHE.get(key)
 
+def store_search_cache(query: str, results: List[Dict[str, Any]]) -> str:
+    key = uuid.uuid4().hex[:10]
+    SEARCH_CACHE[key] = {"query": query, "results": results}
+    if len(SEARCH_CACHE) > 1000:
+        oldest_key = next(iter(SEARCH_CACHE))
+        SEARCH_CACHE.pop(oldest_key, None)
+    return key
+
+def get_search_cache(key: str) -> Optional[Dict[str, Any]]:
+    return SEARCH_CACHE.get(key)
+
 def format_duration(seconds: int | float | None) -> str:
     if not seconds:
         return "Noma'lum"
@@ -39,85 +49,54 @@ def format_duration(seconds: int | float | None) -> str:
 
 def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) -> InlineKeyboardMarkup:
     """
-    Video va Audio formatlari uchun toza va qulay tugmalar.
+    Havolalar uchun Video va Audio yuklash tugmalari.
     """
-    buttons = []
-
-    # Video sifatlari
-    if available_formats:
-        hd_row = []
-        if "720p" in available_formats:
-            hd_row.append(InlineKeyboardButton(text="🎬 Video (720p HD)", callback_data=f"dl:720p:{cache_key}"))
-        if "1080p" in available_formats:
-            hd_row.append(InlineKeyboardButton(text="🎬 Video (1080p FHD)", callback_data=f"dl:1080p:{cache_key}"))
-        if hd_row:
-            buttons.append(hd_row)
-
-        sd_row = []
-        if "360p" in available_formats:
-            sd_row.append(InlineKeyboardButton(text="📱 Video (360p)", callback_data=f"dl:360p:{cache_key}"))
-        if "480p" in available_formats:
-            sd_row.append(InlineKeyboardButton(text="📺 Video (480p)", callback_data=f"dl:480p:{cache_key}"))
-        if sd_row:
-            buttons.append(sd_row)
-
-    buttons.append([
-        InlineKeyboardButton(text="⚡ Eng yaxshi sifat (Video)", callback_data=f"dl:best:{cache_key}")
-    ])
-
-    # Audio bitrate sifatlari
-    buttons.append([
-        InlineKeyboardButton(text="🎵 MP3 (320k HD)", callback_data=f"dl:mp3_320:{cache_key}"),
-        InlineKeyboardButton(text="🎵 MP3 (192k)", callback_data=f"dl:mp3_192:{cache_key}"),
-        InlineKeyboardButton(text="🎵 MP3 (128k)", callback_data=f"dl:mp3_128:{cache_key}")
-    ])
-
+    buttons = [
+        [InlineKeyboardButton(text="🗂 Video", callback_data=f"dl:best:{cache_key}")],
+        [InlineKeyboardButton(text="🎵 Audio (MP3)", callback_data=f"dl:mp3_192:{cache_key}")]
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_search_results_keyboard(results: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, mode: str = "audio") -> InlineKeyboardMarkup:
     """
-    Qo'shiq qidiruv natijalari uchun to'g'ridan-to'g'ri bosiladigan professional tugmalar.
-    Har bir qo'shiq o'z nomi va davomiyligi bilan alohida qatorda chiqadi.
+    Musiqa qidiruvi uchun 2-skrinshotdagi kabi aniq dizayn:
+    [ 🗂 Video ] yoki [ 🎵 Audio ]
+    [ 1 ] [ 2 ] [ 3 ] [ 4 ] [ 5 ]
     """
-    buttons = []
-    for item in results:
-        title = item.get("title", "Qo'shiq").strip()
-        dur = format_duration(item.get("duration"))
+    toggle_btn = (
+        InlineKeyboardButton(text="🗂 Video", callback_data=f"mode:video:{cache_key}")
+        if mode == "audio"
+        else InlineKeyboardButton(text="🎵 Audio", callback_data=f"mode:audio:{cache_key}")
+    )
 
-        # Tugma matnini chiroyli sig'dirish
-        if len(title) > 38:
-            clean_title = title[:35].rstrip() + "..."
-        else:
-            clean_title = title
+    number_buttons = []
+    for i, item in enumerate(results, 1):
+        prefix = "song:" if mode == "audio" else "vsong:"
+        number_buttons.append(
+            InlineKeyboardButton(text=str(i), callback_data=f"{prefix}{item['id']}")
+        )
 
-        btn_text = f"▶️ {clean_title} ({dur})"
-        buttons.append([
-            InlineKeyboardButton(text=btn_text, callback_data=f"song:{item['id']}")
-        ])
-
-    buttons.append([
-        InlineKeyboardButton(text="❌ Qidiruvni yopish", callback_data="cancel_search")
-    ])
-
+    buttons = [
+        [toggle_btn],
+        number_buttons
+    ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_song_action_keyboard(song_key: str, is_fav: bool = False) -> InlineKeyboardMarkup:
+def get_audio_sent_keyboard(song_key: str = None, is_fav: bool = False) -> InlineKeyboardMarkup:
     """
-    Yuborilgan qo'shiq ostidagi sevimli qilish tugmasi.
+    Qo'shiq yuborilgandagi tugmalar (Guruhga qo'shish va Sevimlilar).
     """
-    if is_fav:
-        btn_text = "💔 Sevimlilardan o'chirish"
-        cb_data = f"fav:del:{song_key}"
-    else:
-        btn_text = "❤️ Sevimlilarga qo'shish"
-        cb_data = f"fav:add:{song_key}"
+    buttons = [
+        [InlineKeyboardButton(text="Guruhga qo'shish ⤴️", url="https://t.me/audio_x_bot?startgroup=true")]
+    ]
+    if song_key:
+        fav_text = "💔 Sevimlilardan o'chirish" if is_fav else "❤️ Sevimlilarga qo'shish"
+        fav_cb = f"fav:del:{song_key}" if is_fav else f"fav:add:{song_key}"
+        buttons.append([InlineKeyboardButton(text=fav_text, callback_data=fav_cb)])
 
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=btn_text, callback_data=cb_data)]
-    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:
-    """Xatolik yuz berganda qayta urinish tugmasi."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Qayta urinib ko'rish", callback_data=f"dl:best:{cache_key}")]
     ])
