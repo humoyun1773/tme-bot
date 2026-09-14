@@ -37,11 +37,9 @@ def format_duration(seconds: int | float | None) -> str:
     secs = s % 60
     return f"{mins}:{secs:02d}"
 
-NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-
 def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) -> InlineKeyboardMarkup:
     """
-    Video va Audio sifatlarini (Bitrate) tanlash uchun inline tugmalar.
+    Video va Audio formatlari uchun toza va qulay tugmalar.
     """
     buttons = []
 
@@ -49,17 +47,17 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
     if available_formats:
         hd_row = []
         if "720p" in available_formats:
-            hd_row.append(InlineKeyboardButton(text="🎬 720p HD", callback_data=f"dl:720p:{cache_key}"))
+            hd_row.append(InlineKeyboardButton(text="🎬 Video (720p HD)", callback_data=f"dl:720p:{cache_key}"))
         if "1080p" in available_formats:
-            hd_row.append(InlineKeyboardButton(text="🎬 1080p FHD", callback_data=f"dl:1080p:{cache_key}"))
+            hd_row.append(InlineKeyboardButton(text="🎬 Video (1080p FHD)", callback_data=f"dl:1080p:{cache_key}"))
         if hd_row:
             buttons.append(hd_row)
 
         sd_row = []
         if "360p" in available_formats:
-            sd_row.append(InlineKeyboardButton(text="📱 360p", callback_data=f"dl:360p:{cache_key}"))
+            sd_row.append(InlineKeyboardButton(text="📱 Video (360p)", callback_data=f"dl:360p:{cache_key}"))
         if "480p" in available_formats:
-            sd_row.append(InlineKeyboardButton(text="📺 480p", callback_data=f"dl:480p:{cache_key}"))
+            sd_row.append(InlineKeyboardButton(text="📺 Video (480p)", callback_data=f"dl:480p:{cache_key}"))
         if sd_row:
             buttons.append(sd_row)
 
@@ -67,29 +65,38 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
         InlineKeyboardButton(text="⚡ Eng yaxshi sifat (Video)", callback_data=f"dl:best:{cache_key}")
     ])
 
-    # Audio bitrate tanlovlari
+    # Audio bitrate sifatlari
     buttons.append([
-        InlineKeyboardButton(text="🎵 MP3 320k (HD)", callback_data=f"dl:mp3_320:{cache_key}"),
-        InlineKeyboardButton(text="🎵 MP3 192k", callback_data=f"dl:mp3_192:{cache_key}"),
-        InlineKeyboardButton(text="🎵 MP3 128k", callback_data=f"dl:mp3_128:{cache_key}")
+        InlineKeyboardButton(text="🎵 MP3 (320k HD)", callback_data=f"dl:mp3_320:{cache_key}"),
+        InlineKeyboardButton(text="🎵 MP3 (192k)", callback_data=f"dl:mp3_192:{cache_key}"),
+        InlineKeyboardButton(text="🎵 MP3 (128k)", callback_data=f"dl:mp3_128:{cache_key}")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_search_results_keyboard(results: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
     """
-    Qo'shiq qidiruv natijalari uchun ixcham va estetik raqamli tugmalar qatori.
+    Qo'shiq qidiruv natijalari uchun to'g'ridan-to'g'ri bosiladigan professional tugmalar.
+    Har bir qo'shiq o'z nomi va davomiyligi bilan alohida qatorda chiqadi.
     """
-    number_buttons = []
-    for i, item in enumerate(results):
-        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"[{i+1}]"
-        number_buttons.append(
-            InlineKeyboardButton(text=emoji_num, callback_data=f"song:{item['id']}")
-        )
+    buttons = []
+    for item in results:
+        title = item.get("title", "Qo'shiq").strip()
+        dur = format_duration(item.get("duration"))
 
-    buttons = [number_buttons]
+        # Tugma matnini chiroyli sig'dirish
+        if len(title) > 38:
+            clean_title = title[:35].rstrip() + "..."
+        else:
+            clean_title = title
+
+        btn_text = f"▶️ {clean_title} ({dur})"
+        buttons.append([
+            InlineKeyboardButton(text=btn_text, callback_data=f"song:{item['id']}")
+        ])
+
     buttons.append([
-        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")
+        InlineKeyboardButton(text="❌ Qidiruvni yopish", callback_data="cancel_search")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

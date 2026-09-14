@@ -19,8 +19,7 @@ from keyboards import (
     get_search_results_keyboard,
     get_song_action_keyboard,
     get_retry_keyboard,
-    format_duration,
-    NUMBER_EMOJIS
+    format_duration
 )
 
 logger = logging.getLogger(__name__)
@@ -88,41 +87,26 @@ async def handle_incoming_text(message: types.Message):
     # 2. AGAR ODDIY MATN BO'LSA -> QO'SHIQ QIDIRUVI
     query = text
     status_msg = await message.answer(
-        f"🔎 <i>«{query}» bo'yicha qo'shiqlar qidirilmoqda...</i>",
+        f"🔎 <i>«{query}» qidirilmoqda...</i>",
         parse_mode="HTML"
     )
 
     results = await search_music(query, limit=5)
     if not results:
         await status_msg.edit_text(
-            "❌ <b>Kechirasiz, bunday qo'shiq topilmadi.</b>\n"
+            "❌ <b>Qo'shiq topilmadi.</b>\n"
             "Boshqacha nom yoki ijrochi nomi bilan qayta urinib ko'ring.",
             parse_mode="HTML"
         )
         return
 
-    songs_list_text = (
-        f"🎧 <b>Musiqa qidiruvi:</b> <i>«{query}»</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-    )
-
-    for i, r in enumerate(results):
-        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"{i+1}."
-        dur = format_duration(r.get("duration"))
-        title = r.get("title", "Noma'lum")
-        uploader = r.get("uploader", "Noma'lum ijrochi")
-        songs_list_text += (
-            f"{emoji_num} <b>{title}</b>\n"
-            f"    👤 <i>{uploader}</i>  •  ⏱ <code>{dur}</code>\n\n"
-        )
-
-    songs_list_text += (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 <i>Yuklab olish uchun quyidagi raqamlardan birini bosing:</i>"
+    search_text = (
+        f"🎧 <b>«{query}» bo'yicha topilgan taronalar:</b>\n"
+        "<i>Yuklab olish uchun kerakli qo'shiqni tanlang 👇</i>"
     )
 
     kb = get_search_results_keyboard(results)
-    await status_msg.edit_text(songs_list_text, parse_mode="HTML", reply_markup=kb)
+    await status_msg.edit_text(search_text, parse_mode="HTML", reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("song:"))
@@ -216,11 +200,11 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "cancel_search")
 async def handle_cancel_search(callback: types.CallbackQuery):
-    await callback.answer("Qidiruv bekor qilindi")
+    await callback.answer("Qidiruv yopildi")
     try:
         await callback.message.delete()
     except Exception:
-        await callback.message.edit_text("❌ Qidiruv bekor qilindi.")
+        await callback.message.edit_text("❌ Qidiruv yopildi.")
 
 
 @router.callback_query(F.data.startswith("dl:"))

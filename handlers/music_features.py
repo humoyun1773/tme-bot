@@ -14,7 +14,6 @@ from keyboards import (
     store_url_in_cache,
     get_song_info,
     get_song_action_keyboard,
-    NUMBER_EMOJIS
 )
 
 logger = logging.getLogger(__name__)
@@ -23,51 +22,38 @@ router = Router()
 @router.message(Command("history"))
 async def cmd_history(message: types.Message):
     user_id = message.from_user.id
-    history = await get_user_history(user_id, limit=10)
+    history = await get_user_history(user_id, limit=8)
 
     if not history:
         await message.answer(
-            "📜 <b>Sizning tarixingiz bo'sh.</b>\n"
-            "Bot orqali qo'shiq qidirib yuklasangiz, ular bu yerda saqlanadi!",
+            "📜 <b>Tarix bo'sh.</b>\n"
+            "Qo'shiq yuklaganingizda, oxirgi taronalar shu yerda ko'rinadi.",
             parse_mode="HTML"
         )
         return
 
     text = (
         "📜 <b>Oxirgi yuklab olingan qo'shiqlar:</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>Qayta yuklash uchun kerakli taronani tanlang 👇</i>"
     )
 
     buttons = []
-    row = []
-
-    for i, item in enumerate(history):
-        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"{i+1}."
-        title = item.get("song_title", "Noma'lum")
+    for item in history:
+        title = item.get("song_title", "Qo'shiq")
         performer = item.get("performer", "Noma'lum")
-        date_str = str(item.get("created_at", ""))[:16]
-
-        text += f"{emoji_num} <b>{title}</b>\n   👤 <i>{performer}</i> • 📅 <code>{date_str}</code>\n\n"
-
-        # Qayta yuklash uchun tugma
         source_url = item.get("source_url")
-        if source_url:
-            cache_key = store_url_in_cache(source_url)
-            btn_text = f"{emoji_num}"
-            row.append(InlineKeyboardButton(text=btn_text, callback_data=f"dl:mp3_192:{cache_key}"))
-            if len(row) == 5:
-                buttons.append(row)
-                row = []
+        if not source_url:
+            continue
 
-    if row:
-        buttons.append(row)
+        cache_key = store_url_in_cache(source_url)
+        full_name = f"{title} - {performer}"
+        display_name = (full_name[:36] + "..") if len(full_name) > 36 else full_name
 
-    text += (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 <i>Qayta yuklab olish uchun raqamni bosing:</i>"
-    )
+        buttons.append([
+            InlineKeyboardButton(text=f"▶️ {display_name}", callback_data=f"dl:mp3_192:{cache_key}")
+        ])
 
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
@@ -78,7 +64,7 @@ async def cmd_favorites(message: types.Message):
 
     if not favorites:
         await message.answer(
-            "❤️ <b>Sizning sevimlilar ro'yxatingiz bo'sh.</b>\n"
+            "❤️ <b>Sevimlilar ro'yxatingiz bo'sh.</b>\n"
             "Har qanday qo'shiq yuklanganda pastidagi <b>❤️ Sevimlilarga qo'shish</b> tugmasini bosib saqlab qo'yishingiz mumkin!",
             parse_mode="HTML"
         )
@@ -86,36 +72,26 @@ async def cmd_favorites(message: types.Message):
 
     text = (
         "❤️ <b>Sevimli qo'shiqlaringiz:</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<i>Yuklab olish uchun tanlang 👇</i>"
     )
 
     buttons = []
-    row = []
-
-    for i, item in enumerate(favorites):
-        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"{i+1}."
-        title = item.get("song_title", "Noma'lum")
+    for item in favorites:
+        title = item.get("song_title", "Qo'shiq")
         performer = item.get("performer", "Noma'lum")
-
-        text += f"{emoji_num} <b>{title}</b>\n   👤 <i>{performer}</i>\n\n"
-
         source_url = item.get("source_url")
-        if source_url:
-            cache_key = store_url_in_cache(source_url)
-            row.append(InlineKeyboardButton(text=emoji_num, callback_data=f"dl:mp3_192:{cache_key}"))
-            if len(row) == 5:
-                buttons.append(row)
-                row = []
+        if not source_url:
+            continue
 
-    if row:
-        buttons.append(row)
+        cache_key = store_url_in_cache(source_url)
+        full_name = f"{title} - {performer}"
+        display_name = (full_name[:36] + "..") if len(full_name) > 36 else full_name
 
-    text += (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 <i>Yuklab olish uchun raqamni bosing:</i>"
-    )
+        buttons.append([
+            InlineKeyboardButton(text=f"▶️ {display_name}", callback_data=f"dl:mp3_192:{cache_key}")
+        ])
 
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 

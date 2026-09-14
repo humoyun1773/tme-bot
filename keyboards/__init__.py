@@ -7,8 +7,7 @@ from .inline import (
     get_search_results_keyboard,
     get_song_action_keyboard,
     get_retry_keyboard,
-    format_duration,
-    NUMBER_EMOJIS
+    format_duration
 )
 
 __all__ = [
@@ -20,6 +19,5 @@ __all__ = [
     "get_search_results_keyboard",
     "get_song_action_keyboard",
     "get_retry_keyboard",
-    "format_duration",
-    "NUMBER_EMOJIS"
+    "format_duration"
 ]
