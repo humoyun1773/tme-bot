@@ -1,11 +1,15 @@
-# Universal Media Downloader Bot 📥
+# Universal Media Downloader & Music Bot 📥🎵
 
-Telegram orqali YouTube, Instagram, TikTok va boshqa ommabop ijtimoiy tarmoqlardan video, audio (MP3), rasm va karusel kontentlarini yuklab beruvchi qulay va tezkor bot.
+Telegram orqali YouTube, Instagram, TikTok va boshqa ijtimoiy tarmoqlardan video, audio (MP3), rasm va karusel kontentlarini yuklab beruvchi, shuningdek qo'shiq nomi bo'yicha qidiruvchi universal bot.
 
 ---
 
 ## 🚀 Imkoniyatlar
 
+- 🔎 **Qo'shiq nomi bo'yicha qidirish (Matnli qidiruv)**:
+  - Shunchaki qo'shiq nomi yoki ijrochisini yozing (masalan: `Ummon - Sensiz` yoki `Konsta`)
+  - Eng mos 5 ta natija inline tugmalar shaklida chiqariladi
+  - Qo'shiqni to'liq MP3 formatida, albom muqovasi (cover art) va ijrochi teglari (ID3) bilan yuklab beradi
 - 🔴 **YouTube**:
   - Sifat tanlash imkoniyati: `360p`, `480p`, `720p HD`, `1080p FHD`
   - Faqat audio / musiqa (`MP3`) qilib yuklab olish
@@ -28,8 +32,9 @@ Telegram orqali YouTube, Instagram, TikTok va boshqa ommabop ijtimoiy tarmoqlard
 
 - **Python 3.11+**
 - **aiogram 3.x** (Asinxron Telegram Bot framework)
-- **yt-dlp** (Eng so'nggi media yuklovchi yadro)
+- **yt-dlp** (Eng so'nggi media yuklovchi yadro va qidiruv tizimi)
 - **FFmpeg** / **imageio-ffmpeg** (Audio konvertatsiya va video formatlarni birlashtirish)
+- **mutagen** (MP3 ID3 teglar va muqova rasmlarini joylash)
 - **aiosqlite** (Asinxron SQLite ma'lumotlar bazasi)
 
 ---

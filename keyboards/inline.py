@@ -1,5 +1,5 @@
 import uuid
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Callback_data 64 baytlik chekloviga tushmasligi uchun URL larni qisqa ID bilan keshda saqlaymiz
@@ -9,7 +9,6 @@ def store_url_in_cache(url: str) -> str:
     """URL ni keshda saqlab, qisqa kalit qaytaradi."""
     key = uuid.uuid4().hex[:10]
     URL_CACHE[key] = url
-    # Kesh hajmini cheklash (oxirgi 1000 ta havola)
     if len(URL_CACHE) > 1000:
         oldest_key = next(iter(URL_CACHE))
         URL_CACHE.pop(oldest_key, None)
@@ -19,13 +18,20 @@ def get_url_from_cache(key: str) -> Optional[str]:
     """Qisqa kalit bo'yicha URL ni oladi."""
     return URL_CACHE.get(key)
 
+def format_duration(seconds: int | float | None) -> str:
+    if not seconds:
+        return "Noma'lum"
+    s = int(seconds)
+    mins = s // 60
+    secs = s % 60
+    return f"{mins}:{secs:02d}"
+
 def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) -> InlineKeyboardMarkup:
     """
     Sifat tanlash uchun inline tugmalar yaratadi.
     """
     buttons = []
 
-    # Agar YouTube bo'lib, aniq formatlar berilgan bo'lsa
     if available_formats:
         row = []
         if "360p" in available_formats:
@@ -43,7 +49,6 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
         if row2:
             buttons.append(row2)
 
-    # Standart tezkor yuklash va Audio tugmalari
     buttons.append([
         InlineKeyboardButton(text="⚡ Eng yaxshi sifat (Video)", callback_data=f"dl:best:{cache_key}")
     ])
@@ -51,6 +56,26 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
         InlineKeyboardButton(text="🎵 Faqat audio (MP3)", callback_data=f"dl:audio:{cache_key}")
     ])
 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_search_results_keyboard(results: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+    """
+    Qo'shiq qidiruv natijalari uchun inline tugmalar (5 tagacha).
+    """
+    buttons = []
+    for i, item in enumerate(results, 1):
+        dur = format_duration(item.get("duration"))
+        title = item.get("title", "Musiqa")
+        # Tugma matnini qisqartirish
+        display_title = (title[:30] + "..") if len(title) > 30 else title
+        btn_text = f"{i}. 🎵 {display_title} [{dur}]"
+        buttons.append([
+            InlineKeyboardButton(text=btn_text, callback_data=f"song:{item['id']}")
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:

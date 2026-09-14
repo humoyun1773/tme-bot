@@ -1,12 +1,14 @@
 import asyncio
+import os
 import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import yt_dlp
+from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB
+from mutagen.mp3 import MP3
 
 from config import DOWNLOADS_DIR, FFMPEG_PATH, MAX_FILE_SIZE_BYTES
 
-# Umumiy yt-dlp standart opsiyalari
 BASE_YTDL_OPTS = {
     "outtmpl": str(DOWNLOADS_DIR / "%(id)s_%(epoch)s.%(ext)s"),
     "quiet": True,
@@ -20,7 +22,7 @@ if FFMPEG_PATH:
 
 async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
     """
-    Havola haqidagi asosiy ma'lumotlarni (sarlavha, davomiyligi, mavjud sifatlar) oladi.
+    Havola haqidagi asosiy ma'lumotlarni oladi.
     """
     opts = dict(BASE_YTDL_OPTS)
     opts["extract_flat"] = "in_playlist"
@@ -35,13 +37,11 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
         if not info:
             return None
 
-        # Agar playlist bo'lmasa yoki bitta video bo'lsa
         title = info.get("title", "Noma'lum kontent")
         duration = info.get("duration", 0)
         thumbnail = info.get("thumbnail")
         uploader = info.get("uploader") or info.get("channel", "Noma'lum muallif")
 
-        # Mavjud sifatlarni aniqlash
         available_formats = set()
         formats = info.get("formats") or []
         for f in formats:
@@ -56,7 +56,6 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
                 elif h >= 360:
                     available_formats.add("360p")
 
-        # Agar entries bo'lsa (Instagram karusel yoki postlar)
         is_carousel = False
         entries_count = 0
         if "entries" in info and info["entries"]:
@@ -77,17 +76,38 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
         print(f"Ma'lumot olishda xatolik: {e}")
         return None
 
+def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optional[Path] = None):
+    """MP3 faylga nom, ijrochi va muqova rasmini o'rnatadi."""
+    try:
+        try:
+            audio = MP3(mp3_path, ID3=ID3)
+            audio.add_tags()
+        except Exception:
+            audio = MP3(mp3_path, ID3=ID3)
+
+        audio.tags.add(TIT2(encoding=3, text=title))
+        audio.tags.add(TPE1(encoding=3, text=artist))
+        audio.tags.add(TALB(encoding=3, text="Universal Media Bot"))
+
+        if cover_path and cover_path.is_file():
+            mime = "image/jpeg" if cover_path.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
+            with open(cover_path, "rb") as alb_img:
+                audio.tags.add(
+                    APIC(
+                        encoding=3,
+                        mime=mime,
+                        type=3,  # cover front
+                        desc="Cover",
+                        data=alb_img.read()
+                    )
+                )
+        audio.save()
+    except Exception as e:
+        print(f"ID3 teglar yozishda xatolik: {e}")
+
 async def download_media(url: str, quality: str = "best", is_audio: bool = False) -> Dict[str, Any]:
     """
-    Media (video, audio yoki rasm) yuklab oladi.
-    Qaytaradi: {
-        "status": "success" | "size_exceeded" | "error",
-        "type": "video" | "audio" | "photo" | "album",
-        "files": [list of filepaths],
-        "title": title,
-        "duration": duration,
-        "error_message": str
-    }
+    Media yuklab oladi (video, audio yoki rasm).
     """
     unique_sub = DOWNLOADS_DIR / f"job_{uuid.uuid4().hex[:8]}"
     unique_sub.mkdir(parents=True, exist_ok=True)
@@ -99,11 +119,18 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
 
     if is_audio:
         opts["format"] = "bestaudio/best"
-        opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }]
+        opts["writethumbnail"] = True
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            },
+            {
+                "key": "FFmpegMetadata",
+                "add_metadata": True,
+            }
+        ]
     else:
         if quality == "1080p":
             opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
@@ -125,7 +152,6 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
         loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(None, _do_download)
 
-        # Yuklangan fayllarni topish
         downloaded_files = list(unique_sub.glob("*"))
         if not downloaded_files:
             return {
@@ -135,10 +161,11 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
             }
 
         title = info.get("title", "Fayl") if info else "Fayl"
+        uploader = info.get("uploader") or info.get("channel", "Noma'lum ijrochi") if info else "Noma'lum"
         duration = info.get("duration", 0) if info else 0
 
-        # Fayl hajmini tekshirish (Telegram Bot API 50 MB limiti)
-        total_size = sum(f.stat().st_size for f in downloaded_files)
+        # Fayl hajmini tekshirish
+        total_size = sum(f.stat().st_size for f in downloaded_files if not f.name.endswith((".jpg", ".png", ".webp")))
         if total_size > MAX_FILE_SIZE_BYTES:
             return {
                 "status": "size_exceeded",
@@ -148,27 +175,59 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
                 "title": title
             }
 
-        # Fayl turlarini aniqlash
+        # Muqova rasmini (thumbnail) topish
+        thumbnail_file = None
+        for f in downloaded_files:
+            if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
+                thumbnail_file = f
+                break
+
         if is_audio:
             media_type = "audio"
-        elif len(downloaded_files) > 1:
+            # MP3 faylni topish
+            mp3_files = [f for f in downloaded_files if f.suffix.lower() == ".mp3"]
+            if not mp3_files:
+                # Agar boshqa audio bo'lsa
+                mp3_files = [f for f in downloaded_files if f.suffix.lower() in [".m4a", ".ogg", ".opus", ".wav"]]
+            
+            # Agar mp3 bo'lsa, teglarini to'g'rilaymiz
+            for m in mp3_files:
+                if m.suffix.lower() == ".mp3":
+                    _apply_id3_tags(m, title, uploader, thumbnail_file)
+
+            return {
+                "status": "success",
+                "type": media_type,
+                "files": mp3_files,
+                "title": title,
+                "uploader": uploader,
+                "duration": duration,
+                "thumbnail": thumbnail_file,
+                "temp_dir": unique_sub
+            }
+
+        # Video / Photo / Album
+        non_thumb_files = [f for f in downloaded_files if f != thumbnail_file or not any(x.suffix.lower() in [".mp4", ".mkv", ".webm"] for x in downloaded_files)]
+        if len(non_thumb_files) > 1:
             media_type = "album"
+            files_to_send = non_thumb_files
         else:
-            single = downloaded_files[0]
+            files_to_send = non_thumb_files if non_thumb_files else downloaded_files
+            single = files_to_send[0]
             ext = single.suffix.lower()
             if ext in [".jpg", ".jpeg", ".png", ".webp"]:
                 media_type = "photo"
-            elif ext in [".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav"]:
-                media_type = "audio"
             else:
                 media_type = "video"
 
         return {
             "status": "success",
             "type": media_type,
-            "files": downloaded_files,
+            "files": files_to_send,
             "title": title,
+            "uploader": uploader,
             "duration": duration,
+            "thumbnail": thumbnail_file,
             "temp_dir": unique_sub
         }
 
