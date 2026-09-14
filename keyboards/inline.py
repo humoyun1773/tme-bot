@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 URL_CACHE: Dict[str, str] = {}
+SONG_INFO_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def store_url_in_cache(url: str) -> str:
     """URL ni keshda saqlab, qisqa kalit qaytaradi."""
@@ -17,6 +18,17 @@ def get_url_from_cache(key: str) -> Optional[str]:
     """Qisqa kalit bo'yicha URL ni oladi."""
     return URL_CACHE.get(key)
 
+def store_song_info(info: Dict[str, Any]) -> str:
+    key = uuid.uuid4().hex[:10]
+    SONG_INFO_CACHE[key] = info
+    if len(SONG_INFO_CACHE) > 1000:
+        oldest_key = next(iter(SONG_INFO_CACHE))
+        SONG_INFO_CACHE.pop(oldest_key, None)
+    return key
+
+def get_song_info(key: str) -> Optional[Dict[str, Any]]:
+    return SONG_INFO_CACHE.get(key)
+
 def format_duration(seconds: int | float | None) -> str:
     if not seconds:
         return "Noma'lum"
@@ -29,11 +41,11 @@ NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣
 
 def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) -> InlineKeyboardMarkup:
     """
-    Sifat tanlash uchun zamonaviy va chiroyli inline tugmalar.
+    Video va Audio sifatlarini (Bitrate) tanlash uchun inline tugmalar.
     """
     buttons = []
 
-    # Agar formatlar bo'lsa, HD va SD qilib ajratamiz
+    # Video sifatlari
     if available_formats:
         hd_row = []
         if "720p" in available_formats:
@@ -54,8 +66,12 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
     buttons.append([
         InlineKeyboardButton(text="⚡ Eng yaxshi sifat (Video)", callback_data=f"dl:best:{cache_key}")
     ])
+
+    # Audio bitrate tanlovlari
     buttons.append([
-        InlineKeyboardButton(text="🎵 Faqat audio (MP3)", callback_data=f"dl:audio:{cache_key}")
+        InlineKeyboardButton(text="🎵 MP3 320k (HD)", callback_data=f"dl:mp3_320:{cache_key}"),
+        InlineKeyboardButton(text="🎵 MP3 192k", callback_data=f"dl:mp3_192:{cache_key}"),
+        InlineKeyboardButton(text="🎵 MP3 128k", callback_data=f"dl:mp3_128:{cache_key}")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -71,13 +87,27 @@ def get_search_results_keyboard(results: List[Dict[str, Any]]) -> InlineKeyboard
             InlineKeyboardButton(text=emoji_num, callback_data=f"song:{item['id']}")
         )
 
-    # Tugmalarni ixcham qatorga joylaymiz
     buttons = [number_buttons]
     buttons.append([
         InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_song_action_keyboard(song_key: str, is_fav: bool = False) -> InlineKeyboardMarkup:
+    """
+    Yuborilgan qo'shiq ostidagi sevimli qilish tugmasi.
+    """
+    if is_fav:
+        btn_text = "💔 Sevimlilardan o'chirish"
+        cb_data = f"fav:del:{song_key}"
+    else:
+        btn_text = "❤️ Sevimlilarga qo'shish"
+        cb_data = f"fav:add:{song_key}"
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=btn_text, callback_data=cb_data)]
+    ])
 
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:
     """Xatolik yuz berganda qayta urinish tugmasi."""

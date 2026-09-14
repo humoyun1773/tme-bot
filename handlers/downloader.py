@@ -2,7 +2,7 @@ import os
 import logging
 from aiogram import Router, types, F
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
-from database import increment_download, add_user
+from database import increment_download, add_user, is_favorite
 from services import (
     extract_url,
     detect_platform,
@@ -14,12 +14,14 @@ from services import (
 from keyboards import (
     store_url_in_cache,
     get_url_from_cache,
+    store_song_info,
     get_quality_keyboard,
     get_search_results_keyboard,
+    get_song_action_keyboard,
     get_retry_keyboard,
-    format_duration
+    format_duration,
+    NUMBER_EMOJIS
 )
-from keyboards.inline import NUMBER_EMOJIS
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -62,6 +64,11 @@ async def handle_incoming_text(message: types.Message):
         uploader = info.get("uploader", "Noma'lum")
         duration = format_duration(info.get("duration"))
         available_formats = info.get("available_formats", [])
+        is_long = info.get("is_long", False)
+
+        long_warning = ""
+        if is_long:
+            long_warning = "\n⚠️ <b>Eslatma:</b> Ushbu video 15 daqiqadan ortiq! Yuklash biroz ko'proq vaqt olishi mumkin.\n"
 
         caption = (
             f"🎬 <b>{title}</b>\n"
@@ -69,8 +76,9 @@ async def handle_incoming_text(message: types.Message):
             f"👤 <b>Kanal / Muallif:</b> {uploader}\n"
             f"⏱ <b>Davomiyligi:</b> {duration}\n"
             f"🌐 <b>Platforma:</b> {platform.capitalize()}\n"
+            f"{long_warning}"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "👇 <i>Kerakli sifat yoki formatni tanlang:</i>"
+            "👇 <i>Kerakli video sifati yoki audio (MP3) formatini tanlang:</i>"
         )
 
         kb = get_quality_keyboard(cache_key, available_formats)
@@ -124,14 +132,13 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
     song_url = f"https://www.youtube.com/watch?v={video_id}"
     user_id = callback.from_user.id
 
-    # Asosiy qidiruv xabarini o'chirmaymiz!
     status_msg = await callback.message.answer(
         "⏳ <b>Qo'shiq yuklanmoqda...</b>\n"
         "<i>MP3 formatga o'tkazilib, muqova rasmi va teglari joylanmoqda...</i>",
         parse_mode="HTML"
     )
 
-    res = await download_media(song_url, is_audio=True)
+    res = await download_media(song_url, is_audio=True, bitrate="192")
     temp_dir = res.get("temp_dir")
 
     try:
@@ -165,6 +172,15 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
 
         thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
 
+        song_key = store_song_info({
+            "url": song_url,
+            "title": title,
+            "performer": uploader
+        })
+
+        is_fav = await is_favorite(user_id, song_url)
+        fav_kb = get_song_action_keyboard(song_key, is_fav=is_fav)
+
         await callback.message.answer_audio(
             audio=FSInputFile(str(mp3_file)),
             title=title,
@@ -177,12 +193,12 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 "🤖 @audio_x_bot orqali yuklandi"
             ),
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=fav_kb
         )
 
-        await increment_download(user_id, "music_search", song_url, status="success")
+        await increment_download(user_id, "music_search", song_url, status="success", title=title, performer=uploader)
 
-        # Status xabarini o'chirish
         try:
             await status_msg.delete()
         except Exception:
@@ -227,14 +243,20 @@ async def handle_download_callback(callback: types.CallbackQuery):
     platform, _ = detect_platform(url)
     user_id = callback.from_user.id
 
+    is_audio = quality.startswith("mp3_") or quality == "audio"
+    bitrate = "192"
+    if quality == "mp3_128":
+        bitrate = "128"
+    elif quality == "mp3_320":
+        bitrate = "320"
+
     status_msg = await callback.message.answer(
         "⏳ <b>Yuklanmoqda...</b>\n"
         "<i>Fayl hajmiga qarab bir necha soniya vaqt olishi mumkin. Iltimos kuting.</i>",
         parse_mode="HTML"
     )
 
-    is_audio = (quality == "audio")
-    res = await download_media(url, quality=quality, is_audio=is_audio)
+    res = await download_media(url, quality=quality, is_audio=is_audio, bitrate=bitrate)
     temp_dir = res.get("temp_dir")
 
     try:
@@ -262,7 +284,6 @@ async def handle_download_callback(callback: types.CallbackQuery):
             await increment_download(user_id, platform, url, status="failed")
             return
 
-        # Muvaffaqiyatli yuklandi -> Telegramga jo'natish
         media_type = res.get("type")
         files = res.get("files", [])
         title = res.get("title", "Yuklangan media")
@@ -280,6 +301,14 @@ async def handle_download_callback(callback: types.CallbackQuery):
         )
 
         if media_type == "audio":
+            song_key = store_song_info({
+                "url": url,
+                "title": title,
+                "performer": uploader
+            })
+            is_fav = await is_favorite(user_id, url)
+            fav_kb = get_song_action_keyboard(song_key, is_fav=is_fav)
+
             for f in files:
                 audio_file = FSInputFile(str(f))
                 await callback.message.answer_audio(
@@ -290,11 +319,12 @@ async def handle_download_callback(callback: types.CallbackQuery):
                     thumbnail=thumb_input,
                     caption=(
                         f"🎵 <b>{title}</b>\n"
-                        f"👤 <i>{uploader}</i>\n\n"
+                        f"👤 <i>{uploader}</i> • <i>{bitrate} kbps</i>\n\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
                         f"{bot_mention}"
                     ),
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=fav_kb
                 )
         elif media_type == "photo":
             for f in files:
@@ -326,7 +356,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
                     parse_mode="HTML"
                 )
 
-        await increment_download(user_id, platform, url, status="success")
+        await increment_download(user_id, platform, url, status="success", title=title, performer=uploader)
 
         try:
             await status_msg.delete()

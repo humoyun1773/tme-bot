@@ -10,7 +10,7 @@ from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN, BASE_DIR
 from database import init_db
 from services import clean_downloads_folder
-from handlers import start_router, admin_router, downloader_router
+from handlers import start_router, admin_router, downloader_router, music_features_router
 
 # Log sozlamalari
 logging.basicConfig(
@@ -60,6 +60,7 @@ async def main():
     # Routerlarni ulash
     dp.include_router(start_router)
     dp.include_router(admin_router)
+    dp.include_router(music_features_router)
     dp.include_router(downloader_router)
 
     # Eski pending xabarlarni tozalash

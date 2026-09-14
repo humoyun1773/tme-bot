@@ -48,7 +48,7 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
             return None
 
         title = info.get("title", "Noma'lum kontent")
-        duration = info.get("duration", 0)
+        duration = info.get("duration", 0) or 0
         thumbnail = info.get("thumbnail")
         uploader = info.get("uploader") or info.get("channel", "Noma'lum muallif")
 
@@ -72,6 +72,8 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
             is_carousel = True
             entries_count = len(list(info["entries"]))
 
+        is_long = duration > 900  # 15 daqiqadan ortiq
+
         return {
             "title": title,
             "duration": duration,
@@ -80,6 +82,7 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
             "available_formats": sorted(list(available_formats)),
             "is_carousel": is_carousel,
             "entries_count": entries_count,
+            "is_long": is_long,
             "raw_info": info
         }
     except Exception as e:
@@ -135,9 +138,10 @@ def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optiona
     except Exception as e:
         print(f"ID3 teglar yozishda xatolik: {e}")
 
-async def download_media(url: str, quality: str = "best", is_audio: bool = False) -> Dict[str, Any]:
+async def download_media(url: str, quality: str = "best", is_audio: bool = False, bitrate: str = "192") -> Dict[str, Any]:
     """
     Media yuklab oladi (video, audio yoki rasm).
+    bitrate: '128', '192' yoki '320'
     """
     unique_sub = DOWNLOADS_DIR / f"job_{uuid.uuid4().hex[:8]}"
     unique_sub.mkdir(parents=True, exist_ok=True)
@@ -150,11 +154,12 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
     if is_audio:
         opts["format"] = "bestaudio/best"
         opts["writethumbnail"] = True
+        audio_quality = bitrate if bitrate in ["128", "192", "320"] else "192"
         opts["postprocessors"] = [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",
+                "preferredquality": audio_quality,
             },
             {
                 "key": "FFmpegMetadata",
