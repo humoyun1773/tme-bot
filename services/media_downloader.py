@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -9,12 +10,21 @@ from mutagen.mp3 import MP3
 
 from config import DOWNLOADS_DIR, FFMPEG_PATH, MAX_FILE_SIZE_BYTES
 
+# YouTube va boshqa platformalar uchun ishonchli sozlamalar (403 xatoligining oldini oladi)
 BASE_YTDL_OPTS = {
     "outtmpl": str(DOWNLOADS_DIR / "%(id)s_%(epoch)s.%(ext)s"),
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
     "socket_timeout": 30,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "mweb"]
+        }
+    },
+    "http_headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
 }
 
 if FFMPEG_PATH:
@@ -76,6 +86,26 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
         print(f"Ma'lumot olishda xatolik: {e}")
         return None
 
+def _convert_thumbnail_to_jpg(thumb_path: Path) -> Optional[Path]:
+    """Agar rasm webp bo'lsa, uni Telegram qabul qiladigan JPG formatiga o'tkazadi."""
+    if not thumb_path or not thumb_path.is_file():
+        return None
+    if thumb_path.suffix.lower() in [".jpg", ".jpeg"]:
+        return thumb_path
+    if FFMPEG_PATH:
+        jpg_path = thumb_path.with_suffix(".jpg")
+        try:
+            subprocess.run(
+                [FFMPEG_PATH, "-y", "-i", str(thumb_path), str(jpg_path)],
+                capture_output=True,
+                timeout=10
+            )
+            if jpg_path.is_file():
+                return jpg_path
+        except Exception as e:
+            print(f"Rasm formatini o'tkazishda xatolik: {e}")
+    return thumb_path
+
 def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optional[Path] = None):
     """MP3 faylga nom, ijrochi va muqova rasmini o'rnatadi."""
     try:
@@ -96,7 +126,7 @@ def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optiona
                     APIC(
                         encoding=3,
                         mime=mime,
-                        type=3,  # cover front
+                        type=3,
                         desc="Cover",
                         data=alb_img.read()
                     )
@@ -175,22 +205,19 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
                 "title": title
             }
 
-        # Muqova rasmini (thumbnail) topish
+        # Muqova rasmini (thumbnail) topish va konvertatsiya qilish
         thumbnail_file = None
         for f in downloaded_files:
             if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
-                thumbnail_file = f
+                thumbnail_file = _convert_thumbnail_to_jpg(f)
                 break
 
         if is_audio:
             media_type = "audio"
-            # MP3 faylni topish
             mp3_files = [f for f in downloaded_files if f.suffix.lower() == ".mp3"]
             if not mp3_files:
-                # Agar boshqa audio bo'lsa
                 mp3_files = [f for f in downloaded_files if f.suffix.lower() in [".m4a", ".ogg", ".opus", ".wav"]]
             
-            # Agar mp3 bo'lsa, teglarini to'g'rilaymiz
             for m in mp3_files:
                 if m.suffix.lower() == ".mp3":
                     _apply_id3_tags(m, title, uploader, thumbnail_file)
@@ -233,11 +260,13 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
 
     except yt_dlp.utils.DownloadError as de:
         err = str(de)
-        msg = "Kontent topilmadi yoki bu hisob yopiq (private)."
+        msg = "Kontent topilmadi yoki yuklab olishda muammo yuz berdi."
         if "login" in err.lower() or "private" in err.lower():
             msg = "Kechirasiz, bu profil/kontent yopiq (private) yoki avtorizatsiya talab qiladi."
         elif "copyright" in err.lower():
             msg = "Bu kontent mualliflik huquqi sababli bloklangan."
+        elif "403" in err:
+            msg = "Manbaga ulanishda vaqtinchalik cheklov (403). Iltimos, qayta urinib ko'ring."
         return {
             "status": "error",
             "error_message": msg,
