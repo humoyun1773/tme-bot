@@ -2,7 +2,7 @@ import asyncio
 from typing import List, Dict, Any
 import yt_dlp
 
-async def search_music(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+async def search_music(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """
     Qo'shiq nomi yoki ijrochi bo'yicha YouTube'dan qidiradi va mos keluvchi natijalarni qaytaradi.
     """

@@ -59,9 +59,10 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
 
 def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, mode: str = "audio") -> InlineKeyboardMarkup:
     """
-    Musiqa qidiruvi uchun 2-skrinshotdagi kabi aniq dizayn:
+    Musiqa qidiruvi uchun 10 ta natijali aniq dizayn:
     [ 🗂 Video ] yoki [ 🎵 Audio ]
     [ 1 ] [ 2 ] [ 3 ] [ 4 ] [ 5 ]
+    [ 6 ] [ 7 ] [ 8 ] [ 9 ] [ 10 ]
     """
     toggle_btn = (
         InlineKeyboardButton(text="🗂 Video", callback_data=f"mode:video:{cache_key}")
@@ -69,17 +70,22 @@ def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, m
         else InlineKeyboardButton(text="🎵 Audio", callback_data=f"mode:audio:{cache_key}")
     )
 
-    number_buttons = []
+    prefix = "song:" if mode == "audio" else "vsong:"
+    row1 = []
+    row2 = []
     for i, item in enumerate(results, 1):
-        prefix = "song:" if mode == "audio" else "vsong:"
-        number_buttons.append(
-            InlineKeyboardButton(text=str(i), callback_data=f"{prefix}{item['id']}")
-        )
+        btn = InlineKeyboardButton(text=str(i), callback_data=f"{prefix}{item['id']}")
+        if i <= 5:
+            row1.append(btn)
+        else:
+            row2.append(btn)
 
-    buttons = [
-        [toggle_btn],
-        number_buttons
-    ]
+    buttons = [[toggle_btn]]
+    if row1:
+        buttons.append(row1)
+    if row2:
+        buttons.append(row2)
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_audio_sent_keyboard() -> InlineKeyboardMarkup:

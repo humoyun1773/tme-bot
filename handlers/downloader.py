@@ -95,7 +95,7 @@ async def handle_incoming_text(message: types.Message):
     query = text
     status_msg = await message.answer("🔍 Qidirilmoqda...")
 
-    results = await search_music(query, limit=5)
+    results = await search_music(query, limit=10)
     if not results:
         await status_msg.edit_text("❌ Hech narsa topilmadi.")
         return
