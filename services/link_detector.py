@@ -1,51 +1,75 @@
 import re
 from typing import Tuple, Optional
 
-# Havolalarni aniqlash uchun regex andozalari
+# Aniq platforma regex andozalari
 PATTERNS = {
     "youtube": re.compile(
-        r"(https?://)?(www\.|m\.)?(youtube\.com/(?:watch\?v=|shorts/|live/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})"
+        r"(https?://)?((?:www\.|m\.|music\.)?youtube\.com/(?:watch\?v=|shorts/|live/|embed/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
+        re.IGNORECASE
     ),
     "instagram": re.compile(
-        r"(https?://)?(www\.)?instagram\.com/(?:p|reel|reels|tv|stories)/([a-zA-Z0-9_\-\.]+)"
+        r"(https?://)?((?:www\.)?instagram\.com/(?:p|reel|reels|tv|stories)/[a-zA-Z0-9_\-\.]+)",
+        re.IGNORECASE
     ),
     "tiktok": re.compile(
-        r"(https?://)?(www\.|vm\.|vt\.)?tiktok\.com/(@[a-zA-Z0-9_\.]+/video/\d+|[a-zA-Z0-9_\-\.]+)"
+        r"(https?://)?((?:www\.|vm\.|vt\.)?tiktok\.com/(?:@[a-zA-Z0-9_\.]+/video/\d+|[a-zA-Z0-9_\-\.]+))",
+        re.IGNORECASE
     ),
     "twitter": re.compile(
-        r"(https?://)?(www\.)?(twitter\.com|x\.com)/[a-zA-Z0-9_]+/status/\d+"
+        r"(https?://)?((?:www\.)?(?:twitter\.com|x\.com)/[a-zA-Z0-9_]+/status/\d+)",
+        re.IGNORECASE
     ),
     "facebook": re.compile(
-        r"(https?://)?(www\.|m\.|fb\.)?(facebook\.com|fb\.watch)/"
+        r"(https?://)?((?:www\.|m\.|fb\.)?(?:facebook\.com|fb\.watch)/[^\s]+)",
+        re.IGNORECASE
     ),
     "pinterest": re.compile(
-        r"(https?://)?(www\.|pin\.)?pinterest\.(com|[a-z]{2})/|pin\.it/"
+        r"(https?://)?((?:www\.|pin\.)?(?:pinterest\.(?:com|[a-z]{2})|pin\.it)/[^\s]+)",
+        re.IGNORECASE
     ),
     "soundcloud": re.compile(
-        r"(https?://)?(www\.)?soundcloud\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+"
+        r"(https?://)?((?:www\.)?soundcloud\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)",
+        re.IGNORECASE
     )
 }
 
-GENERAL_URL_PATTERN = re.compile(r"https?://[^\s]+")
+# Umumiy havolalarni (http/https yoki domen bilan) aniqlash
+GENERAL_URL_REGEX = re.compile(
+    r"(https?://[^\s]+)|((?:[a-zA-Z0-9-]+\.)*(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|facebook\.com|fb\.watch|pinterest\.com|pin\.it|soundcloud\.com)/[^\s]+)",
+    re.IGNORECASE
+)
+
+CLEAN_TRAILING = ".,!?)>\"'`:;]"
 
 def extract_url(text: str) -> Optional[str]:
-    """Matn ichidan birinchi to'liq URL manzilni ajratib oladi."""
+    """
+    Matn ichidan havolani ajratib oladi.
+    Agar foydalanuvchi 'https://' siz yozsa ham (masalan: instagram.com/reel/...) to'g'ri taniydi.
+    """
     if not text:
         return None
-    match = GENERAL_URL_PATTERN.search(text)
-    return match.group(0) if match else None
+
+    match = GENERAL_URL_REGEX.search(text)
+    if not match:
+        return None
+
+    url = match.group(0).rstrip(CLEAN_TRAILING)
+
+    # Agar protokol bo'lmasa, https:// qo'shamiz
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    return url
 
 def detect_platform(url: str) -> Tuple[str, str]:
     """
     URL qaysi platformaga tegishli ekanini aniqlaydi.
-    Qaytaradi: (platform_nomi, tozalangan_url)
     """
     for platform, pattern in PATTERNS.items():
         if pattern.search(url):
             return platform, url
 
-    # Umumiy yt-dlp qo'llab-quvvatlaydigan boshqa manbalar
-    if GENERAL_URL_PATTERN.match(url):
+    if url.startswith(("http://", "https://")):
         return "other", url
 
     return "unknown", url
