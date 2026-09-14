@@ -1,4 +1,5 @@
 import os
+import logging
 from aiogram import Router, types, F
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
 from database import increment_download, add_user
@@ -19,6 +20,7 @@ from keyboards import (
     format_duration
 )
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -99,12 +101,13 @@ async def handle_incoming_text(message: types.Message):
 
 @router.callback_query(F.data.startswith("song:"))
 async def handle_song_download_callback(callback: types.CallbackQuery):
-    await callback.answer()
+    await callback.answer("⏳ Qo'shiq yuklanmoqda...")
     video_id = callback.data.split(":", 1)[1]
     song_url = f"https://www.youtube.com/watch?v={video_id}"
     user_id = callback.from_user.id
 
-    await callback.message.edit_text(
+    # Asosiy qidiruv xabarini o'chirmaymiz va buzmaymiz! Alohida status xabari chiqaramiz:
+    status_msg = await callback.message.answer(
         "⏳ <b>Qo'shiq yuklanmoqda...</b>\n"
         "<i>MP3 formatga o'tkazilib, muqova rasmi va teglari joylanmoqda...</i>",
         parse_mode="HTML"
@@ -116,7 +119,7 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
     try:
         if res["status"] == "error":
             err = res.get("error_message", "Noma'lum xatolik")
-            await callback.message.edit_text(
+            await status_msg.edit_text(
                 f"❌ <b>Qo'shiqni yuklashda xatolik yuz berdi:</b>\n{err}",
                 parse_mode="HTML"
             )
@@ -124,19 +127,16 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
             return
 
         if res["status"] == "size_exceeded":
-            await callback.message.edit_text(
+            await status_msg.edit_text(
                 "⚠️ Fayl hajmi 50 MB dan oshib ketdi. Telegram orqali yuborib bo'lmadi.",
                 parse_mode="HTML"
             )
             await increment_download(user_id, "music_search", song_url, status="size_exceeded")
             return
 
-        # Audio muvaffaqiyatli yuklandi
-        await callback.message.edit_text("📤 <b>Telegramga yuborilmoqda...</b>", parse_mode="HTML")
-
         files = res.get("files", [])
         if not files:
-            await callback.message.edit_text("❌ Audio fayl topilmadi.")
+            await status_msg.edit_text("❌ Audio fayl topilmadi.")
             return
 
         mp3_file = files[0]
@@ -159,11 +159,18 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
 
         await increment_download(user_id, "music_search", song_url, status="success")
 
+        # Faqat vaqtinchalik yuklanmoqda status xabarini o'chiramiz (qidiruv xabari saqlanib qoladi!)
         try:
-            await callback.message.delete()
+            await status_msg.delete()
         except Exception:
             pass
 
+    except Exception as e:
+        logger.error(f"Audio yuborishda xatolik: {e}")
+        try:
+            await status_msg.edit_text(f"❌ Xatolik yuz berdi: {str(e)[:100]}")
+        except Exception:
+            pass
     finally:
         remove_file(temp_dir)
 
@@ -179,7 +186,7 @@ async def handle_cancel_search(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("dl:"))
 async def handle_download_callback(callback: types.CallbackQuery):
-    await callback.answer()
+    await callback.answer("⏳ Yuklab olish boshlandi...")
     data_parts = callback.data.split(":")
     if len(data_parts) < 3:
         return
@@ -189,7 +196,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
     url = get_url_from_cache(cache_key)
 
     if not url:
-        await callback.message.edit_text(
+        await callback.message.answer(
             "⚠️ Havola eskirgan. Iltimos, havolani qaytadan yuboring."
         )
         return
@@ -197,7 +204,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
     platform, _ = detect_platform(url)
     user_id = callback.from_user.id
 
-    await callback.message.edit_text(
+    status_msg = await callback.message.answer(
         "⏳ <b>Yuklanmoqda...</b>\n"
         "<i>Fayl hajmiga qarab bir necha soniya vaqt olishi mumkin. Iltimos kuting.</i>",
         parse_mode="HTML"
@@ -211,7 +218,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
         if res["status"] == "size_exceeded":
             size_mb = res.get("size_mb", 0)
             kb = get_quality_keyboard(cache_key)
-            await callback.message.edit_text(
+            await status_msg.edit_text(
                 f"⚠️ <b>Fayl hajmi juda katta ({size_mb} MB)!</b>\n"
                 "Telegram bot orqali maksimal 50 MB gacha fayl yuborish mumkin.\n\n"
                 "Iltimos, pastroq sifatni yoki faqat <b>🎵 Audio (MP3)</b> variantini tanlang:",
@@ -224,7 +231,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
         if res["status"] == "error":
             err = res.get("error_message", "Noma'lum xatolik")
             kb = get_retry_keyboard(cache_key)
-            await callback.message.edit_text(
+            await status_msg.edit_text(
                 f"❌ <b>Yuklashda xatolik yuz berdi:</b>\n{err}",
                 parse_mode="HTML",
                 reply_markup=kb
@@ -233,8 +240,6 @@ async def handle_download_callback(callback: types.CallbackQuery):
             return
 
         # Muvaffaqiyatli yuklandi -> Telegramga jo'natish
-        await callback.message.edit_text("📤 <b>Telegramga yuborilmoqda...</b>", parse_mode="HTML")
-
         media_type = res.get("type")
         files = res.get("files", [])
         title = res.get("title", "Yuklangan media")
@@ -288,10 +293,17 @@ async def handle_download_callback(callback: types.CallbackQuery):
 
         await increment_download(user_id, platform, url, status="success")
 
+        # Vaqtinchalik status xabarni o'chirish
         try:
-            await callback.message.delete()
+            await status_msg.delete()
         except Exception:
             pass
 
+    except Exception as e:
+        logger.error(f"Fayl yuborishda xatolik: {e}")
+        try:
+            await status_msg.edit_text(f"❌ Fayl yuborishda xatolik: {str(e)[:100]}")
+        except Exception:
+            pass
     finally:
         remove_file(temp_dir)
