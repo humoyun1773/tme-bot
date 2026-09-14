@@ -82,18 +82,13 @@ def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, m
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_audio_sent_keyboard(song_key: str = None, is_fav: bool = False) -> InlineKeyboardMarkup:
+def get_audio_sent_keyboard() -> InlineKeyboardMarkup:
     """
-    Qo'shiq yuborilgandagi tugmalar (Guruhga qo'shish va Sevimlilar).
+    Qo'shiq yuborilgandagi yagona tugma: faqat Guruhga qo'shish ⤴️
     """
     buttons = [
         [InlineKeyboardButton(text="Guruhga qo'shish ⤴️", url="https://t.me/audio_x_bot?startgroup=true")]
     ]
-    if song_key:
-        fav_text = "💔 Sevimlilardan o'chirish" if is_fav else "❤️ Sevimlilarga qo'shish"
-        fav_cb = f"fav:del:{song_key}" if is_fav else f"fav:add:{song_key}"
-        buttons.append([InlineKeyboardButton(text=fav_text, callback_data=fav_cb)])
-
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:

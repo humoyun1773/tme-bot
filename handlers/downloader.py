@@ -153,14 +153,7 @@ async def handle_song_download(callback: types.CallbackQuery):
 
         thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
 
-        song_key = store_song_info({
-            "url": song_url,
-            "title": title,
-            "performer": uploader
-        })
-
-        is_fav = await is_favorite(user_id, song_url)
-        kb = get_audio_sent_keyboard(song_key, is_fav=is_fav)
+        kb = get_audio_sent_keyboard()
 
         await callback.message.answer_audio(
             audio=FSInputFile(str(mp3_file)),
@@ -275,13 +268,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
         thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
 
         if media_type == "audio":
-            song_key = store_song_info({
-                "url": url,
-                "title": title,
-                "performer": uploader
-            })
-            is_fav = await is_favorite(user_id, url)
-            kb = get_audio_sent_keyboard(song_key, is_fav=is_fav)
+            kb = get_audio_sent_keyboard()
 
             for f in files:
                 await callback.message.answer_audio(
