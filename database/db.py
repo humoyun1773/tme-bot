@@ -1,5 +1,6 @@
 import aiosqlite
 from datetime import datetime
+from typing import Optional
 from config import DATABASE_PATH
 
 async def init_db():
@@ -44,7 +45,42 @@ async def init_db():
                 UNIQUE(user_id, source_url)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS file_cache (
+                source_url TEXT PRIMARY KEY,
+                file_id TEXT,
+                media_type TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
+
+async def get_cached_file(source_url: str, media_type: str = "audio") -> Optional[str]:
+    """Tezkor yuklash: Telegram serverlaridagi file_id orqali 0.2 soniyada qaytarish."""
+    try:
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            async with db.execute(
+                "SELECT file_id FROM file_cache WHERE source_url = ? AND media_type = ?",
+                (source_url, media_type)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+    except Exception:
+        return None
+
+async def set_cached_file(source_url: str, file_id: str, media_type: str = "audio"):
+    try:
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            await db.execute("""
+                INSERT INTO file_cache (source_url, file_id, media_type)
+                VALUES (?, ?, ?)
+                ON CONFLICT(source_url) DO UPDATE SET
+                    file_id = excluded.file_id,
+                    media_type = excluded.media_type
+            """, (source_url, file_id, media_type))
+            await db.commit()
+    except Exception:
+        pass
 
 async def add_user(user_id: int, username: str | None, full_name: str | None):
     async with aiosqlite.connect(DATABASE_PATH) as db:

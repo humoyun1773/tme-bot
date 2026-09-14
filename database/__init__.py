@@ -8,7 +8,9 @@ from .db import (
     add_to_favorites,
     remove_from_favorites,
     get_favorites,
-    is_favorite
+    is_favorite,
+    get_cached_file,
+    set_cached_file
 )
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "add_to_favorites",
     "remove_from_favorites",
     "get_favorites",
-    "is_favorite"
+    "is_favorite",
+    "get_cached_file",
+    "set_cached_file"
 ]

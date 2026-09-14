@@ -10,13 +10,15 @@ from mutagen.mp3 import MP3
 
 from config import DOWNLOADS_DIR, FFMPEG_PATH, MAX_FILE_SIZE_BYTES
 
-# YouTube va boshqa platformalar uchun ishonchli sozlamalar (403 xatoligining oldini oladi)
+# YouTube va boshqa platformalar uchun maksimal tezlik sozlamalari
 BASE_YTDL_OPTS = {
     "outtmpl": str(DOWNLOADS_DIR / "%(id)s_%(epoch)s.%(ext)s"),
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
-    "socket_timeout": 30,
+    "socket_timeout": 20,
+    "buffersize": 1024 * 1024,
+    "concurrent_fragment_downloads": 4,
     "extractor_args": {
         "youtube": {
             "player_client": ["android", "mweb"]
@@ -31,9 +33,6 @@ if FFMPEG_PATH:
     BASE_YTDL_OPTS["ffmpeg_location"] = FFMPEG_PATH
 
 async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
-    """
-    Havola haqidagi asosiy ma'lumotlarni oladi.
-    """
     opts = dict(BASE_YTDL_OPTS)
     opts["extract_flat"] = "in_playlist"
 
@@ -72,7 +71,7 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
             is_carousel = True
             entries_count = len(list(info["entries"]))
 
-        is_long = duration > 900  # 15 daqiqadan ortiq
+        is_long = duration > 900
 
         return {
             "title": title,
@@ -89,28 +88,8 @@ async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
         print(f"Ma'lumot olishda xatolik: {e}")
         return None
 
-def _convert_thumbnail_to_jpg(thumb_path: Path) -> Optional[Path]:
-    """Agar rasm webp bo'lsa, uni Telegram qabul qiladigan JPG formatiga o'tkazadi."""
-    if not thumb_path or not thumb_path.is_file():
-        return None
-    if thumb_path.suffix.lower() in [".jpg", ".jpeg"]:
-        return thumb_path
-    if FFMPEG_PATH:
-        jpg_path = thumb_path.with_suffix(".jpg")
-        try:
-            subprocess.run(
-                [FFMPEG_PATH, "-y", "-i", str(thumb_path), str(jpg_path)],
-                capture_output=True,
-                timeout=10
-            )
-            if jpg_path.is_file():
-                return jpg_path
-        except Exception as e:
-            print(f"Rasm formatini o'tkazishda xatolik: {e}")
-    return thumb_path
-
-def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optional[Path] = None):
-    """MP3 faylga nom, ijrochi va muqova rasmini o'rnatadi."""
+def _apply_id3_tags(mp3_path: Path, title: str, artist: str):
+    """MP3 faylga nom va ijrochini tezkor yozadi (ortiqcha kechikishsiz)."""
     try:
         try:
             audio = MP3(mp3_path, ID3=ID3)
@@ -121,27 +100,13 @@ def _apply_id3_tags(mp3_path: Path, title: str, artist: str, cover_path: Optiona
         audio.tags.add(TIT2(encoding=3, text=title))
         audio.tags.add(TPE1(encoding=3, text=artist))
         audio.tags.add(TALB(encoding=3, text="Universal Media Bot"))
-
-        if cover_path and cover_path.is_file():
-            mime = "image/jpeg" if cover_path.suffix.lower() in [".jpg", ".jpeg"] else "image/png"
-            with open(cover_path, "rb") as alb_img:
-                audio.tags.add(
-                    APIC(
-                        encoding=3,
-                        mime=mime,
-                        type=3,
-                        desc="Cover",
-                        data=alb_img.read()
-                    )
-                )
         audio.save()
     except Exception as e:
-        print(f"ID3 teglar yozishda xatolik: {e}")
+        pass
 
-async def download_media(url: str, quality: str = "best", is_audio: bool = False, bitrate: str = "192") -> Dict[str, Any]:
+async def download_media(url: str, quality: str = "best", is_audio: bool = False, bitrate: str = "160") -> Dict[str, Any]:
     """
     Media yuklab oladi (video, audio yoki rasm).
-    bitrate: '128', '192' yoki '320'
     """
     unique_sub = DOWNLOADS_DIR / f"job_{uuid.uuid4().hex[:8]}"
     unique_sub.mkdir(parents=True, exist_ok=True)
@@ -153,19 +118,17 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
 
     if is_audio:
         opts["format"] = "bestaudio/best"
-        opts["writethumbnail"] = True
-        audio_quality = bitrate if bitrate in ["128", "192", "320"] else "192"
+        audio_quality = bitrate if bitrate in ["128", "160", "192", "320"] else "160"
         opts["postprocessors"] = [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": audio_quality,
-            },
-            {
-                "key": "FFmpegMetadata",
-                "add_metadata": True,
             }
         ]
+        opts["postprocessor_args"] = {
+            "ffmpeg": ["-threads", "0"]
+        }
     else:
         if quality == "1080p":
             opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
@@ -178,6 +141,9 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
         else:
             opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
         opts["merge_output_format"] = "mp4"
+        opts["postprocessor_args"] = {
+            "ffmpeg": ["-threads", "0"]
+        }
 
     def _do_download():
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -199,8 +165,7 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
         uploader = info.get("uploader") or info.get("channel", "Noma'lum ijrochi") if info else "Noma'lum"
         duration = info.get("duration", 0) if info else 0
 
-        # Fayl hajmini tekshirish
-        total_size = sum(f.stat().st_size for f in downloaded_files if not f.name.endswith((".jpg", ".png", ".webp")))
+        total_size = sum(f.stat().st_size for f in downloaded_files)
         if total_size > MAX_FILE_SIZE_BYTES:
             return {
                 "status": "size_exceeded",
@@ -210,13 +175,6 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
                 "title": title
             }
 
-        # Muqova rasmini (thumbnail) topish va konvertatsiya qilish
-        thumbnail_file = None
-        for f in downloaded_files:
-            if f.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]:
-                thumbnail_file = _convert_thumbnail_to_jpg(f)
-                break
-
         if is_audio:
             media_type = "audio"
             mp3_files = [f for f in downloaded_files if f.suffix.lower() == ".mp3"]
@@ -225,7 +183,7 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
             
             for m in mp3_files:
                 if m.suffix.lower() == ".mp3":
-                    _apply_id3_tags(m, title, uploader, thumbnail_file)
+                    _apply_id3_tags(m, title, uploader)
 
             return {
                 "status": "success",
@@ -234,17 +192,16 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
                 "title": title,
                 "uploader": uploader,
                 "duration": duration,
-                "thumbnail": thumbnail_file,
+                "thumbnail": None,
                 "temp_dir": unique_sub
             }
 
         # Video / Photo / Album
-        non_thumb_files = [f for f in downloaded_files if f != thumbnail_file or not any(x.suffix.lower() in [".mp4", ".mkv", ".webm"] for x in downloaded_files)]
-        if len(non_thumb_files) > 1:
+        if len(downloaded_files) > 1:
             media_type = "album"
-            files_to_send = non_thumb_files
+            files_to_send = downloaded_files
         else:
-            files_to_send = non_thumb_files if non_thumb_files else downloaded_files
+            files_to_send = downloaded_files
             single = files_to_send[0]
             ext = single.suffix.lower()
             if ext in [".jpg", ".jpeg", ".png", ".webp"]:
@@ -259,7 +216,7 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
             "title": title,
             "uploader": uploader,
             "duration": duration,
-            "thumbnail": thumbnail_file,
+            "thumbnail": None,
             "temp_dir": unique_sub
         }
 

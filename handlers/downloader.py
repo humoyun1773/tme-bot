@@ -1,8 +1,14 @@
+import asyncio
 import os
 import logging
 from aiogram import Router, types, F
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
-from database import increment_download, add_user, is_favorite
+from database import (
+    increment_download,
+    add_user,
+    get_cached_file,
+    set_cached_file
+)
 from services import (
     extract_url,
     detect_platform,
@@ -14,13 +20,11 @@ from services import (
 from keyboards import (
     store_url_in_cache,
     get_url_from_cache,
-    store_song_info,
     store_search_cache,
     get_search_cache,
     get_quality_keyboard,
     get_search_results_keyboard,
     get_audio_sent_keyboard,
-    get_retry_keyboard,
     format_duration
 )
 
@@ -38,6 +42,17 @@ def build_search_message_text(query: str, results: list, mode: str = "audio") ->
         title = r.get("title", "Noma'lum")
         lines.append(f"{i}. {title} {dur}")
     return "\n".join(lines)
+
+async def keep_chat_action(bot, chat_id: int, action: str):
+    """Yuklash davomida Telegramda uzluksiz 'yuborilmoqda...' indikatorini ko'rsatish."""
+    try:
+        while True:
+            await bot.send_chat_action(chat_id, action)
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -76,7 +91,7 @@ async def handle_incoming_text(message: types.Message):
         await status_msg.edit_text(caption, reply_markup=kb)
         return
 
-    # 2. AGAR ODDIY MATN BO'LSA -> QO'SHIQ QIDIRUVI (2-skrinshotdagi aniq format)
+    # 2. AGAR ODDIY MATN BO'LSA -> QO'SHIQ QIDIRUVI
     query = text
     status_msg = await message.answer("🔍 Qidirilmoqda...")
 
@@ -94,12 +109,11 @@ async def handle_incoming_text(message: types.Message):
 
 @router.callback_query(F.data.startswith("mode:"))
 async def handle_mode_toggle(callback: types.CallbackQuery):
-    """Audio va Video rejimlari o'rtasida o'tish (🗂 Video <-> 🎵 Audio)."""
     parts = callback.data.split(":")
     if len(parts) < 3:
         return
 
-    new_mode = parts[1]  # "video" yoki "audio"
+    new_mode = parts[1]
     search_key = parts[2]
     cache = get_search_cache(search_key)
 
@@ -119,112 +133,155 @@ async def handle_mode_toggle(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("song:"))
 async def handle_song_download(callback: types.CallbackQuery):
-    """1, 2, 3, 4, 5 bosilganda MP3 Audio yuklash."""
-    await callback.answer("⏳ Yuklanmoqda...", show_alert=False)
     video_id = callback.data.split(":", 1)[1]
     song_url = f"https://www.youtube.com/watch?v={video_id}"
     user_id = callback.from_user.id
+    kb = get_audio_sent_keyboard()
 
-    try:
-        await callback.bot.send_chat_action(callback.message.chat.id, "upload_voice")
-    except Exception:
-        pass
+    # 1. Tezkor kesh (agar oldin yuklangan bo'lsa 0.2 soniyada yuboriladi!)
+    cached_file_id = await get_cached_file(song_url, "audio")
+    if cached_file_id:
+        await callback.answer("⚡ Yuborilmoqda...")
+        try:
+            await callback.message.answer_audio(
+                audio=cached_file_id,
+                caption=BOT_PROMO,
+                reply_markup=kb
+            )
+            await increment_download(user_id, "music_search", song_url, status="success")
+            return
+        except Exception:
+            pass  # Agar eski file_id eskirgan bo'lsa, qayta yuklaymiz
 
-    res = await download_media(song_url, is_audio=True, bitrate="192")
+    await callback.answer("⚡ Yuklanmoqda...")
+    status_msg = await callback.message.reply("⚡ <i>Yuklanmoqda...</i>", parse_mode="HTML")
+    action_task = asyncio.create_task(keep_chat_action(callback.bot, callback.message.chat.id, "upload_voice"))
+
+    res = await download_media(song_url, is_audio=True, bitrate="160")
     temp_dir = res.get("temp_dir")
 
     try:
+        action_task.cancel()
         if res["status"] != "success":
             err = res.get("error_message", "Yuklab bo'lmadi.")
-            await callback.answer(f"Xatolik: {err}", show_alert=True)
+            await status_msg.edit_text(f"❌ {err}")
             await increment_download(user_id, "music_search", song_url, status="failed")
             return
 
         files = res.get("files", [])
         if not files:
-            await callback.answer("Audio topilmadi.", show_alert=True)
+            await status_msg.edit_text("❌ Audio topilmadi.")
             return
 
         mp3_file = files[0]
         title = res.get("title", "Qo'shiq")
         uploader = res.get("uploader", "Ijrochi")
         duration = int(res.get("duration", 0))
-        thumbnail = res.get("thumbnail")
 
-        thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
-
-        kb = get_audio_sent_keyboard()
-
-        await callback.message.answer_audio(
+        sent_msg = await callback.message.answer_audio(
             audio=FSInputFile(str(mp3_file)),
             title=title,
             performer=uploader,
             duration=duration,
-            thumbnail=thumb_input,
             caption=BOT_PROMO,
             reply_markup=kb
         )
 
+        # Telegram serverlaridagi file_id ni keshga saqlash (keyingi safar 0.2s da yuborish uchun)
+        if sent_msg.audio:
+            await set_cached_file(song_url, sent_msg.audio.file_id, "audio")
+
         await increment_download(user_id, "music_search", song_url, status="success", title=title, performer=uploader)
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Audio yuborishda xatolik: {e}")
-        await callback.answer("Xatolik yuz berdi.", show_alert=True)
+        try:
+            await status_msg.edit_text("❌ Yuklashda xatolik yuz berdi.")
+        except Exception:
+            pass
     finally:
         remove_file(temp_dir)
 
 
 @router.callback_query(F.data.startswith("vsong:"))
 async def handle_vsong_download(callback: types.CallbackQuery):
-    """1, 2, 3, 4, 5 Video rejimida bosilganda MP4 Video yuklash."""
-    await callback.answer("⏳ Video yuklanmoqda...", show_alert=False)
     video_id = callback.data.split(":", 1)[1]
     song_url = f"https://www.youtube.com/watch?v={video_id}"
     user_id = callback.from_user.id
+    kb = get_audio_sent_keyboard()
 
-    try:
-        await callback.bot.send_chat_action(callback.message.chat.id, "upload_video")
-    except Exception:
-        pass
+    # Kesh tekshirish
+    cached_file_id = await get_cached_file(song_url, "video")
+    if cached_file_id:
+        await callback.answer("⚡ Yuborilmoqda...")
+        try:
+            await callback.message.answer_video(
+                video=cached_file_id,
+                caption=BOT_PROMO,
+                reply_markup=kb
+            )
+            await increment_download(user_id, "video_search", song_url, status="success")
+            return
+        except Exception:
+            pass
+
+    await callback.answer("⚡ Video yuklanmoqda...")
+    status_msg = await callback.message.reply("⚡ <i>Video yuklanmoqda...</i>", parse_mode="HTML")
+    action_task = asyncio.create_task(keep_chat_action(callback.bot, callback.message.chat.id, "upload_video"))
 
     res = await download_media(song_url, quality="best", is_audio=False)
     temp_dir = res.get("temp_dir")
 
     try:
+        action_task.cancel()
         if res["status"] != "success":
             err = res.get("error_message", "Videoni yuklab bo'lmadi.")
-            await callback.answer(f"Xatolik: {err}", show_alert=True)
+            await status_msg.edit_text(f"❌ {err}")
             await increment_download(user_id, "video_search", song_url, status="failed")
             return
 
         files = res.get("files", [])
         if not files:
-            await callback.answer("Video topilmadi.", show_alert=True)
+            await status_msg.edit_text("❌ Video topilmadi.")
             return
 
         video_file = files[0]
         title = res.get("title", "Video")
         uploader = res.get("uploader", "Muallif")
-        kb = get_audio_sent_keyboard()
 
-        await callback.message.answer_video(
+        sent_msg = await callback.message.answer_video(
             video=FSInputFile(str(video_file)),
             caption=BOT_PROMO,
             reply_markup=kb
         )
 
+        if sent_msg.video:
+            await set_cached_file(song_url, sent_msg.video.file_id, "video")
+
         await increment_download(user_id, "video_search", song_url, status="success", title=title, performer=uploader)
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Video yuborishda xatolik: {e}")
-        await callback.answer("Xatolik yuz berdi.", show_alert=True)
+        try:
+            await status_msg.edit_text("❌ Videoni yuklashda xatolik yuz berdi.")
+        except Exception:
+            pass
     finally:
         remove_file(temp_dir)
 
 
 @router.callback_query(F.data.startswith("dl:"))
 async def handle_download_callback(callback: types.CallbackQuery):
-    await callback.answer("⏳ Yuklanmoqda...", show_alert=False)
     data_parts = callback.data.split(":")
     if len(data_parts) < 3:
         return
@@ -239,23 +296,43 @@ async def handle_download_callback(callback: types.CallbackQuery):
 
     platform, _ = detect_platform(url)
     user_id = callback.from_user.id
-
     is_audio = quality.startswith("mp3_") or quality == "audio"
-    bitrate = "192"
+    media_key = "audio" if is_audio else "video"
 
-    try:
-        action = "upload_voice" if is_audio else "upload_video"
-        await callback.bot.send_chat_action(callback.message.chat.id, action)
-    except Exception:
-        pass
+    kb = get_audio_sent_keyboard()
+
+    cached_file_id = await get_cached_file(url, media_key)
+    if cached_file_id:
+        await callback.answer("⚡ Yuborilmoqda...")
+        try:
+            if is_audio:
+                await callback.message.answer_audio(audio=cached_file_id, caption=BOT_PROMO, reply_markup=kb)
+            else:
+                await callback.message.answer_video(video=cached_file_id, caption=BOT_PROMO, reply_markup=kb)
+            await increment_download(user_id, platform, url, status="success")
+            return
+        except Exception:
+            pass
+
+    await callback.answer("⚡ Yuklanmoqda...")
+    status_msg = await callback.message.reply("⚡ <i>Yuklanmoqda...</i>", parse_mode="HTML")
+    action_type = "upload_voice" if is_audio else "upload_video"
+    action_task = asyncio.create_task(keep_chat_action(callback.bot, callback.message.chat.id, action_type))
+
+    bitrate = "160"
+    if quality == "mp3_128":
+        bitrate = "128"
+    elif quality == "mp3_320":
+        bitrate = "320"
 
     res = await download_media(url, quality=quality, is_audio=is_audio, bitrate=bitrate)
     temp_dir = res.get("temp_dir")
 
     try:
+        action_task.cancel()
         if res["status"] != "success":
             err = res.get("error_message", "Yuklab bo'lmadi.")
-            await callback.answer(f"Xatolik: {err}", show_alert=True)
+            await status_msg.edit_text(f"❌ {err}")
             await increment_download(user_id, platform, url, status="failed")
             return
 
@@ -264,22 +341,19 @@ async def handle_download_callback(callback: types.CallbackQuery):
         title = res.get("title", "Media")
         uploader = res.get("uploader", "Noma'lum")
         duration = int(res.get("duration", 0))
-        thumbnail = res.get("thumbnail")
-        thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
 
         if media_type == "audio":
-            kb = get_audio_sent_keyboard()
-
             for f in files:
-                await callback.message.answer_audio(
+                sent_msg = await callback.message.answer_audio(
                     audio=FSInputFile(str(f)),
                     title=title,
                     performer=uploader,
                     duration=duration,
-                    thumbnail=thumb_input,
                     caption=BOT_PROMO,
                     reply_markup=kb
                 )
+                if sent_msg.audio:
+                    await set_cached_file(url, sent_msg.audio.file_id, "audio")
         elif media_type == "photo":
             for f in files:
                 await callback.message.answer_photo(
@@ -299,18 +373,27 @@ async def handle_download_callback(callback: types.CallbackQuery):
                 media_group[0].caption = BOT_PROMO
                 await callback.message.answer_media_group(media=media_group)
         else:
-            kb = get_audio_sent_keyboard()
             for f in files:
-                await callback.message.answer_video(
+                sent_msg = await callback.message.answer_video(
                     video=FSInputFile(str(f)),
                     caption=BOT_PROMO,
                     reply_markup=kb
                 )
+                if sent_msg.video:
+                    await set_cached_file(url, sent_msg.video.file_id, "video")
 
         await increment_download(user_id, platform, url, status="success", title=title, performer=uploader)
 
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
     except Exception as e:
         logger.error(f"Fayl yuborishda xatolik: {e}")
-        await callback.answer("Xatolik yuz berdi.", show_alert=True)
+        try:
+            await status_msg.edit_text("❌ Yuklashda xatolik yuz berdi.")
+        except Exception:
+            pass
     finally:
         remove_file(temp_dir)
