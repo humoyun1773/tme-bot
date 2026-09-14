@@ -19,6 +19,7 @@ from keyboards import (
     get_retry_keyboard,
     format_duration
 )
+from keyboards.inline import NUMBER_EMOJIS
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -37,19 +38,21 @@ async def handle_incoming_text(message: types.Message):
         platform, clean_url = detect_platform(url)
         if platform == "unknown":
             await message.answer(
-                "❌ Kechirasiz, bu havola qo'llab-quvvatlanmaydi.\n"
-                "Qo'llab-quvvatlanadigan platformalar: YouTube, Instagram, TikTok, Twitter/X, Pinterest va b.",
+                "❌ <b>Kechirasiz, bu havola qo'llab-quvvatlanmaydi.</b>\n\n"
+                "Qo'llab-quvvatlanadigan platformalar:\n"
+                "• YouTube, Instagram, TikTok, Twitter/X, Pinterest va b.",
                 parse_mode="HTML"
             )
             return
 
-        status_msg = await message.answer("🔍 Havola tahlil qilinmoqda...")
+        status_msg = await message.answer("🔍 <i>Havola tahlil qilinmoqda...</i>", parse_mode="HTML")
 
         info = await get_media_info(clean_url)
         if not info:
             await status_msg.edit_text(
-                "❌ Kontent topilmadi yoki ushbu hisob yopiq (private).\n"
-                "Iltimos, havolani tekshirib qayta yuboring."
+                "❌ <b>Kontent topilmadi yoki bu hisob yopiq (private).</b>\n"
+                "Iltimos, havolani tekshirib qaytadan yuboring.",
+                parse_mode="HTML"
             )
             await increment_download(user.id, platform, clean_url, status="failed")
             return
@@ -61,11 +64,13 @@ async def handle_incoming_text(message: types.Message):
         available_formats = info.get("available_formats", [])
 
         caption = (
-            f"🎬 <b>{title}</b>\n\n"
-            f"👤 Muallif: <b>{uploader}</b>\n"
-            f"⏱ Davomiyligi: <b>{duration}</b>\n"
-            f"🌐 Manba: <b>{platform.capitalize()}</b>\n\n"
-            "⬇️ <i>Kerakli sifat yoki formatni tanlang:</i>"
+            f"🎬 <b>{title}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Kanal / Muallif:</b> {uploader}\n"
+            f"⏱ <b>Davomiyligi:</b> {duration}\n"
+            f"🌐 <b>Platforma:</b> {platform.capitalize()}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 <i>Kerakli sifat yoki formatni tanlang:</i>"
         )
 
         kb = get_quality_keyboard(cache_key, available_formats)
@@ -82,18 +87,31 @@ async def handle_incoming_text(message: types.Message):
     results = await search_music(query, limit=5)
     if not results:
         await status_msg.edit_text(
-            "❌ Kechirasiz, bunday qo'shiq topilmadi.\n"
+            "❌ <b>Kechirasiz, bunday qo'shiq topilmadi.</b>\n"
             "Boshqacha nom yoki ijrochi nomi bilan qayta urinib ko'ring.",
             parse_mode="HTML"
         )
         return
 
-    songs_list_text = f"🎵 <b>«{query}» bo'yicha topilgan qo'shiqlar:</b>\n\n"
-    for i, r in enumerate(results, 1):
-        dur = format_duration(r.get("duration"))
-        songs_list_text += f"{i}. <b>{r['title']}</b>\n   👤 {r['uploader']} | ⏱ {dur}\n\n"
+    songs_list_text = (
+        f"🎧 <b>Musiqa qidiruvi:</b> <i>«{query}»</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
 
-    songs_list_text += "⬇️ <i>Yuklab olish uchun pastdagi tugmalardan birini bosing:</i>"
+    for i, r in enumerate(results):
+        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"{i+1}."
+        dur = format_duration(r.get("duration"))
+        title = r.get("title", "Noma'lum")
+        uploader = r.get("uploader", "Noma'lum ijrochi")
+        songs_list_text += (
+            f"{emoji_num} <b>{title}</b>\n"
+            f"    👤 <i>{uploader}</i>  •  ⏱ <code>{dur}</code>\n\n"
+        )
+
+    songs_list_text += (
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 <i>Yuklab olish uchun quyidagi raqamlardan birini bosing:</i>"
+    )
 
     kb = get_search_results_keyboard(results)
     await status_msg.edit_text(songs_list_text, parse_mode="HTML", reply_markup=kb)
@@ -106,7 +124,7 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
     song_url = f"https://www.youtube.com/watch?v={video_id}"
     user_id = callback.from_user.id
 
-    # Asosiy qidiruv xabarini o'chirmaymiz va buzmaymiz! Alohida status xabari chiqaramiz:
+    # Asosiy qidiruv xabarini o'chirmaymiz!
     status_msg = await callback.message.answer(
         "⏳ <b>Qo'shiq yuklanmoqda...</b>\n"
         "<i>MP3 formatga o'tkazilib, muqova rasmi va teglari joylanmoqda...</i>",
@@ -128,7 +146,7 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
 
         if res["status"] == "size_exceeded":
             await status_msg.edit_text(
-                "⚠️ Fayl hajmi 50 MB dan oshib ketdi. Telegram orqali yuborib bo'lmadi.",
+                "⚠️ <b>Fayl hajmi 50 MB dan oshib ketdi.</b> Telegram orqali yuborib bo'lmadi.",
                 parse_mode="HTML"
             )
             await increment_download(user_id, "music_search", song_url, status="size_exceeded")
@@ -153,13 +171,18 @@ async def handle_song_download_callback(callback: types.CallbackQuery):
             performer=uploader,
             duration=duration,
             thumbnail=thumb_input,
-            caption=f"🎵 <b>{title}</b>\n👤 <b>{uploader}</b>\n\n🤖 @audio_x_bot orqali yuklandi",
+            caption=(
+                f"🎵 <b>{title}</b>\n"
+                f"👤 <i>{uploader}</i>\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "🤖 @audio_x_bot orqali yuklandi"
+            ),
             parse_mode="HTML"
         )
 
         await increment_download(user_id, "music_search", song_url, status="success")
 
-        # Faqat vaqtinchalik yuklanmoqda status xabarini o'chiramiz (qidiruv xabari saqlanib qoladi!)
+        # Status xabarini o'chirish
         try:
             await status_msg.delete()
         except Exception:
@@ -247,7 +270,14 @@ async def handle_download_callback(callback: types.CallbackQuery):
         duration = int(res.get("duration", 0))
         thumbnail = res.get("thumbnail")
         thumb_input = FSInputFile(str(thumbnail)) if (thumbnail and thumbnail.is_file()) else None
-        bot_mention = "@audio_x_bot orqali yuklandi"
+        bot_mention = "🤖 @audio_x_bot orqali yuklandi"
+
+        caption_text = (
+            f"🎬 <b>{title}</b>\n"
+            f"👤 <i>{uploader}</i>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"{bot_mention}"
+        )
 
         if media_type == "audio":
             for f in files:
@@ -258,7 +288,12 @@ async def handle_download_callback(callback: types.CallbackQuery):
                     performer=uploader,
                     duration=duration,
                     thumbnail=thumb_input,
-                    caption=f"🎵 <b>{title}</b>\n\n🤖 {bot_mention}",
+                    caption=(
+                        f"🎵 <b>{title}</b>\n"
+                        f"👤 <i>{uploader}</i>\n\n"
+                        "━━━━━━━━━━━━━━━━━━━━\n"
+                        f"{bot_mention}"
+                    ),
                     parse_mode="HTML"
                 )
         elif media_type == "photo":
@@ -266,7 +301,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
                 photo_file = FSInputFile(str(f))
                 await callback.message.answer_photo(
                     photo=photo_file,
-                    caption=f"📷 <b>{title}</b>\n\n🤖 {bot_mention}",
+                    caption=caption_text,
                     parse_mode="HTML"
                 )
         elif media_type == "album":
@@ -279,7 +314,7 @@ async def handle_download_callback(callback: types.CallbackQuery):
                     media_group.append(InputMediaVideo(media=FSInputFile(str(f))))
 
             if media_group:
-                media_group[0].caption = f"📦 <b>{title}</b>\n\n🤖 {bot_mention}"
+                media_group[0].caption = caption_text
                 media_group[0].parse_mode = "HTML"
                 await callback.message.answer_media_group(media=media_group)
         else:
@@ -287,13 +322,12 @@ async def handle_download_callback(callback: types.CallbackQuery):
                 video_file = FSInputFile(str(f))
                 await callback.message.answer_video(
                     video=video_file,
-                    caption=f"🎬 <b>{title}</b>\n\n🤖 {bot_mention}",
+                    caption=caption_text,
                     parse_mode="HTML"
                 )
 
         await increment_download(user_id, platform, url, status="success")
 
-        # Vaqtinchalik status xabarni o'chirish
         try:
             await status_msg.delete()
         except Exception:

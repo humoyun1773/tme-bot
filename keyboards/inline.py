@@ -2,7 +2,6 @@ import uuid
 from typing import Dict, List, Optional, Any
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Callback_data 64 baytlik chekloviga tushmasligi uchun URL larni qisqa ID bilan keshda saqlaymiz
 URL_CACHE: Dict[str, str] = {}
 
 def store_url_in_cache(url: str) -> str:
@@ -26,28 +25,31 @@ def format_duration(seconds: int | float | None) -> str:
     secs = s % 60
     return f"{mins}:{secs:02d}"
 
+NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+
 def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) -> InlineKeyboardMarkup:
     """
-    Sifat tanlash uchun inline tugmalar yaratadi.
+    Sifat tanlash uchun zamonaviy va chiroyli inline tugmalar.
     """
     buttons = []
 
+    # Agar formatlar bo'lsa, HD va SD qilib ajratamiz
     if available_formats:
-        row = []
-        if "360p" in available_formats:
-            row.append(InlineKeyboardButton(text="🎬 360p", callback_data=f"dl:360p:{cache_key}"))
-        if "480p" in available_formats:
-            row.append(InlineKeyboardButton(text="🎬 480p", callback_data=f"dl:480p:{cache_key}"))
-        if row:
-            buttons.append(row)
-
-        row2 = []
+        hd_row = []
         if "720p" in available_formats:
-            row2.append(InlineKeyboardButton(text="🎬 720p HD", callback_data=f"dl:720p:{cache_key}"))
+            hd_row.append(InlineKeyboardButton(text="🎬 720p HD", callback_data=f"dl:720p:{cache_key}"))
         if "1080p" in available_formats:
-            row2.append(InlineKeyboardButton(text="🎬 1080p FHD", callback_data=f"dl:1080p:{cache_key}"))
-        if row2:
-            buttons.append(row2)
+            hd_row.append(InlineKeyboardButton(text="🎬 1080p FHD", callback_data=f"dl:1080p:{cache_key}"))
+        if hd_row:
+            buttons.append(hd_row)
+
+        sd_row = []
+        if "360p" in available_formats:
+            sd_row.append(InlineKeyboardButton(text="📱 360p", callback_data=f"dl:360p:{cache_key}"))
+        if "480p" in available_formats:
+            sd_row.append(InlineKeyboardButton(text="📺 480p", callback_data=f"dl:480p:{cache_key}"))
+        if sd_row:
+            buttons.append(sd_row)
 
     buttons.append([
         InlineKeyboardButton(text="⚡ Eng yaxshi sifat (Video)", callback_data=f"dl:best:{cache_key}")
@@ -60,22 +62,21 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
 
 def get_search_results_keyboard(results: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
     """
-    Qo'shiq qidiruv natijalari uchun inline tugmalar (5 tagacha).
+    Qo'shiq qidiruv natijalari uchun ixcham va estetik raqamli tugmalar qatori.
     """
-    buttons = []
-    for i, item in enumerate(results, 1):
-        dur = format_duration(item.get("duration"))
-        title = item.get("title", "Musiqa")
-        # Tugma matnini qisqartirish
-        display_title = (title[:30] + "..") if len(title) > 30 else title
-        btn_text = f"{i}. 🎵 {display_title} [{dur}]"
-        buttons.append([
-            InlineKeyboardButton(text=btn_text, callback_data=f"song:{item['id']}")
-        ])
+    number_buttons = []
+    for i, item in enumerate(results):
+        emoji_num = NUMBER_EMOJIS[i] if i < len(NUMBER_EMOJIS) else f"[{i+1}]"
+        number_buttons.append(
+            InlineKeyboardButton(text=emoji_num, callback_data=f"song:{item['id']}")
+        )
 
+    # Tugmalarni ixcham qatorga joylaymiz
+    buttons = [number_buttons]
     buttons.append([
         InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")
     ])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:
