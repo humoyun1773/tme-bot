@@ -57,20 +57,13 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, mode: str = "audio") -> InlineKeyboardMarkup:
+def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str = "", mode: str = "audio") -> InlineKeyboardMarkup:
     """
-    Musiqa qidiruvi uchun 10 ta natijali aniq dizayn:
-    [ 🗂 Video ] yoki [ 🎵 Audio ]
+    Musiqa qidiruvi uchun faqat raqamli tugmalar:
     [ 1 ] [ 2 ] [ 3 ] [ 4 ] [ 5 ]
     [ 6 ] [ 7 ] [ 8 ] [ 9 ] [ 10 ]
     """
-    toggle_btn = (
-        InlineKeyboardButton(text="🗂 Video", callback_data=f"mode:video:{cache_key}")
-        if mode == "audio"
-        else InlineKeyboardButton(text="🎵 Audio", callback_data=f"mode:audio:{cache_key}")
-    )
-
-    prefix = "song:" if mode == "audio" else "vsong:"
+    prefix = "song:"
     row1 = []
     row2 = []
     for i, item in enumerate(results, 1):
@@ -80,7 +73,7 @@ def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str, m
         else:
             row2.append(btn)
 
-    buttons = [[toggle_btn]]
+    buttons = []
     if row1:
         buttons.append(row1)
     if row2:

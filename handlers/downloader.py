@@ -34,9 +34,7 @@ router = Router()
 BOT_PROMO = "@audio_x_bot orqali istagan musiqangizni tez va oson toping!"
 
 def build_search_message_text(query: str, results: list, mode: str = "audio") -> str:
-    icon = "🎵" if mode == "audio" else "🎬"
-    suffix = "" if mode == "audio" else " (Video)"
-    lines = [f"{icon} {query}{suffix}\n"]
+    lines = [f"🎵 {query}\n"]
     for i, r in enumerate(results, 1):
         dur = format_duration(r.get("duration"))
         title = r.get("title", "Noma'lum")
