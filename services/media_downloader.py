@@ -10,22 +10,25 @@ from mutagen.mp3 import MP3
 
 from config import DOWNLOADS_DIR, FFMPEG_PATH, MAX_FILE_SIZE_BYTES
 
+try:
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+    CHROME_TARGET = ImpersonateTarget.from_str("chrome")
+except Exception:
+    CHROME_TARGET = None
+
 # YouTube va boshqa platformalar uchun maksimal tezlik sozlamalari
 BASE_YTDL_OPTS = {
     "outtmpl": str(DOWNLOADS_DIR / "%(id)s_%(epoch)s.%(ext)s"),
     "quiet": True,
     "no_warnings": True,
     "noplaylist": True,
-    "socket_timeout": 20,
-    "buffersize": 1024 * 1024,
+    "socket_timeout": 12,
+    "buffersize": 512 * 1024,
     "concurrent_fragment_downloads": 4,
     "extractor_args": {
         "youtube": {
-            "player_client": ["android", "mweb"]
+            "player_client": ["android"]
         }
-    },
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
 }
 
@@ -35,6 +38,9 @@ if FFMPEG_PATH:
 async def get_media_info(url: str) -> Optional[Dict[str, Any]]:
     opts = dict(BASE_YTDL_OPTS)
     opts["extract_flat"] = "in_playlist"
+    opts["skip_download"] = True
+    if CHROME_TARGET and ("instagram" in url or "tiktok" in url or "pin" in url or "twitter" in url or "x.com" in url):
+        opts["impersonate"] = CHROME_TARGET
 
     def _extract():
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -127,9 +133,12 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
             }
         ]
         opts["postprocessor_args"] = {
-            "ffmpeg": ["-threads", "0"]
+            "ffmpeg": ["-threads", "0", "-preset", "ultrafast"]
         }
     else:
+        if CHROME_TARGET and ("instagram" in url or "tiktok" in url or "pin" in url or "twitter" in url or "x.com" in url):
+            opts["impersonate"] = CHROME_TARGET
+
         if quality == "1080p":
             opts["format"] = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
         elif quality == "720p":
@@ -139,10 +148,10 @@ async def download_media(url: str, quality: str = "best", is_audio: bool = False
         elif quality == "360p":
             opts["format"] = "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
         else:
-            opts["format"] = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            opts["format"] = "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best"
         opts["merge_output_format"] = "mp4"
         opts["postprocessor_args"] = {
-            "ffmpeg": ["-threads", "0"]
+            "ffmpeg": ["-threads", "0", "-preset", "ultrafast"]
         }
 
     def _do_download():
