@@ -107,6 +107,18 @@ def get_audio_sent_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def get_video_sent_keyboard(cache_key: str) -> InlineKeyboardMarkup:
+    """
+    Video yuborilgandagi tugmalar:
+    1. Musiqani yuklash
+    2. Guruhga qo'shish
+    """
+    buttons = [
+        [InlineKeyboardButton(text="🎵 Musiqani yuklab olish", callback_data=f"dl:mp3_160:{cache_key}")],
+        [InlineKeyboardButton(text="Guruhga qo'shish ⤴️", url="https://t.me/audio_x_bot?startgroup=true")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def get_retry_keyboard(cache_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Qayta urinib ko'rish", callback_data=f"dl:best:{cache_key}")]

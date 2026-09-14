@@ -25,6 +25,7 @@ from keyboards import (
     get_quality_keyboard,
     get_search_results_keyboard,
     get_audio_sent_keyboard,
+    get_video_sent_keyboard,
     format_duration
 )
 
@@ -74,92 +75,74 @@ async def handle_incoming_text(message: types.Message):
             )
             return
 
-        kb = get_audio_sent_keyboard()
+        cache_key = store_url_in_cache(clean_url)
+        video_kb = get_video_sent_keyboard(cache_key)
 
-        # Tezkor kesh tekshirish (agar oldin yuklangan bo'lsa 0.1 soniyada yuboriladi!)
+        # 1. Tezkor kesh tekshirish (agar oldin yuklangan bo'lsa 0.1 soniyada yuboriladi!)
         cached_video_id = await get_cached_file(clean_url, "video")
         if cached_video_id:
-            await message.answer_video(video=cached_video_id, caption=BOT_PROMO, reply_markup=kb)
+            await message.answer_video(video=cached_video_id, caption=BOT_PROMO, reply_markup=video_kb)
             await increment_download(user.id, platform, clean_url, status="success")
             return
 
-        # Instagram, TikTok, Pinterest, Twitter - darhol yuklab yuborish (2 marta bosib kutmaslik uchun)
-        if platform in ["instagram", "tiktok", "pinterest", "twitter"]:
-            status_msg = await message.answer("⚡ <i>Yuklanmoqda...</i>", parse_mode="HTML")
-            action_task = asyncio.create_task(keep_chat_action(message.bot, message.chat.id, "upload_video"))
+        # 2. Birdaniga videoni yuklab yuborish (tagida musiqani yuklash tugmasi bilan)
+        status_msg = await message.answer("⚡ <i>Yuklanmoqda...</i>", parse_mode="HTML")
+        action_task = asyncio.create_task(keep_chat_action(message.bot, message.chat.id, "upload_video"))
 
-            res = await download_media(clean_url, quality="best", is_audio=False)
-            temp_dir = res.get("temp_dir")
+        res = await download_media(clean_url, quality="best", is_audio=False)
+        temp_dir = res.get("temp_dir")
+
+        try:
+            action_task.cancel()
+            if res["status"] != "success":
+                err = res.get("error_message", "Yuklab bo'lmadi.")
+                await status_msg.edit_text(f"❌ {err}")
+                await increment_download(user.id, platform, clean_url, status="failed")
+                return
+
+            media_type = res.get("type")
+            files = res.get("files", [])
+            title = res.get("title", "Media")
+            uploader = res.get("uploader", "Muallif")
+
+            if media_type == "photo":
+                for f in files:
+                    await message.answer_photo(photo=FSInputFile(str(f)), caption=BOT_PROMO)
+            elif media_type == "album":
+                media_group = []
+                for f in files[:10]:
+                    ext = f.suffix.lower()
+                    if ext in [".jpg", ".jpeg", ".png", ".webp"]:
+                        media_group.append(InputMediaPhoto(media=FSInputFile(str(f))))
+                    else:
+                        media_group.append(InputMediaVideo(media=FSInputFile(str(f))))
+                if media_group:
+                    media_group[0].caption = BOT_PROMO
+                    await message.answer_media_group(media=media_group)
+            else:
+                for f in files:
+                    sent_msg = await message.answer_video(
+                        video=FSInputFile(str(f)),
+                        caption=BOT_PROMO,
+                        reply_markup=video_kb
+                    )
+                    if sent_msg.video:
+                        await set_cached_file(clean_url, sent_msg.video.file_id, "video")
+
+            await increment_download(user.id, platform, clean_url, status="success", title=title, performer=uploader)
 
             try:
-                action_task.cancel()
-                if res["status"] != "success":
-                    err = res.get("error_message", "Yuklab bo'lmadi.")
-                    await status_msg.edit_text(f"❌ {err}")
-                    await increment_download(user.id, platform, clean_url, status="failed")
-                    return
-
-                media_type = res.get("type")
-                files = res.get("files", [])
-                title = res.get("title", "Media")
-                uploader = res.get("uploader", "Muallif")
-
-                if media_type == "photo":
-                    for f in files:
-                        await message.answer_photo(photo=FSInputFile(str(f)), caption=BOT_PROMO)
-                elif media_type == "album":
-                    media_group = []
-                    for f in files[:10]:
-                        ext = f.suffix.lower()
-                        if ext in [".jpg", ".jpeg", ".png", ".webp"]:
-                            media_group.append(InputMediaPhoto(media=FSInputFile(str(f))))
-                        else:
-                            media_group.append(InputMediaVideo(media=FSInputFile(str(f))))
-                    if media_group:
-                        media_group[0].caption = BOT_PROMO
-                        await message.answer_media_group(media=media_group)
-                else:
-                    for f in files:
-                        sent_msg = await message.answer_video(
-                            video=FSInputFile(str(f)),
-                            caption=BOT_PROMO,
-                            reply_markup=kb
-                        )
-                        if sent_msg.video:
-                            await set_cached_file(clean_url, sent_msg.video.file_id, "video")
-
-                await increment_download(user.id, platform, clean_url, status="success", title=title, performer=uploader)
-
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    pass
-            except Exception as e:
-                logger.error(f"Media yuborishda xatolik: {e}")
-                try:
-                    await status_msg.edit_text("❌ Yuklashda xatolik yuz berdi.")
-                except Exception:
-                    pass
-            finally:
-                remove_file(temp_dir)
-            return
-
-        # YouTube havolalari uchun:
-        status_msg = await message.answer("🔍 Qidirilmoqda...")
-
-        info = await get_media_info(clean_url)
-        if not info:
-            await status_msg.edit_text("❌ Kontent topilmadi yoki bu hisob yopiq (private).")
-            await increment_download(user.id, platform, clean_url, status="failed")
-            return
-
-        cache_key = store_url_in_cache(clean_url)
-        title = info.get("title", "Media")
-        duration = format_duration(info.get("duration"))
-
-        caption = f"🎬 {title} {duration}"
-        kb = get_quality_keyboard(cache_key)
-        await status_msg.edit_text(caption, reply_markup=kb)
+                await status_msg.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Media yuborishda xatolik: {e}")
+            try:
+                await status_msg.edit_text("❌ Yuklashda xatolik yuz berdi.")
+            except Exception:
+                pass
+        finally:
+            remove_file(temp_dir)
         return
 
     # 2. AGAR ODDIY MATN BO'LSA -> QO'SHIQ QIDIRUVI

@@ -8,6 +8,7 @@ from .inline import (
     get_quality_keyboard,
     get_search_results_keyboard,
     get_audio_sent_keyboard,
+    get_video_sent_keyboard,
     get_retry_keyboard,
     format_duration
 )
@@ -22,6 +23,7 @@ __all__ = [
     "get_quality_keyboard",
     "get_search_results_keyboard",
     "get_audio_sent_keyboard",
+    "get_video_sent_keyboard",
     "get_retry_keyboard",
     "format_duration"
 ]
