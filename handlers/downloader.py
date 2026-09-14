@@ -33,9 +33,11 @@ router = Router()
 
 BOT_PROMO = "@audio_x_bot orqali istagan musiqangizni tez va oson toping!"
 
-def build_search_message_text(query: str, results: list, mode: str = "audio") -> str:
+def build_search_message_text(query: str, results: list, page: int = 0, page_size: int = 10) -> str:
+    start_idx = page * page_size
+    page_results = results[start_idx : start_idx + page_size]
     lines = [f"🎵 {query}\n"]
-    for i, r in enumerate(results, 1):
+    for i, r in enumerate(page_results, start=start_idx + 1):
         dur = format_duration(r.get("duration"))
         title = r.get("title", "Noma'lum")
         lines.append(f"{i}. {title} {dur}")
@@ -93,40 +95,64 @@ async def handle_incoming_text(message: types.Message):
     query = text
     status_msg = await message.answer("🔍 Qidirilmoqda...")
 
-    results = await search_music(query, limit=10)
+    results = await search_music(query, limit=30)
     if not results:
         await status_msg.edit_text("❌ Hech narsa topilmadi.")
         return
 
     search_key = store_search_cache(query, results)
-    msg_text = build_search_message_text(query, results, mode="audio")
-    kb = get_search_results_keyboard(results, search_key, mode="audio")
+    msg_text = build_search_message_text(query, results, page=0, page_size=10)
+    kb = get_search_results_keyboard(results, search_key, page=0, page_size=10)
 
     await status_msg.edit_text(msg_text, reply_markup=kb)
 
 
-@router.callback_query(F.data.startswith("mode:"))
-async def handle_mode_toggle(callback: types.CallbackQuery):
+@router.callback_query(F.data == "close_search")
+async def handle_close_search(callback: types.CallbackQuery):
+    try:
+        await callback.message.delete()
+    except Exception:
+        await callback.answer()
+
+
+@router.callback_query(F.data.startswith("page:"))
+async def handle_search_page(callback: types.CallbackQuery):
     parts = callback.data.split(":")
     if len(parts) < 3:
         return
 
-    new_mode = parts[1]
-    search_key = parts[2]
-    cache = get_search_cache(search_key)
+    cache_key = parts[1]
+    try:
+        target_page = int(parts[2])
+    except ValueError:
+        return
 
+    cache = get_search_cache(cache_key)
     if not cache:
         await callback.answer("Qidiruv eskirgan. Qaytadan qidiring.", show_alert=True)
         return
 
     query = cache["query"]
     results = cache["results"]
+    page_size = 10
+    total_pages = (len(results) + page_size - 1) // page_size
 
-    msg_text = build_search_message_text(query, results, mode=new_mode)
-    kb = get_search_results_keyboard(results, search_key, mode=new_mode)
+    if target_page < 0:
+        await callback.answer("Siz 1-sahifadasiz!")
+        return
 
-    await callback.message.edit_text(msg_text, reply_markup=kb)
-    await callback.answer()
+    if target_page >= total_pages:
+        await callback.answer("Keyingi sahifada boshqa natija yo'q!")
+        return
+
+    msg_text = build_search_message_text(query, results, page=target_page, page_size=page_size)
+    kb = get_search_results_keyboard(results, cache_key, page=target_page, page_size=page_size)
+
+    try:
+        await callback.message.edit_text(msg_text, reply_markup=kb)
+        await callback.answer()
+    except Exception:
+        await callback.answer()
 
 
 @router.callback_query(F.data.startswith("song:"))

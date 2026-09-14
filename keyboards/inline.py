@@ -57,27 +57,44 @@ def get_quality_keyboard(cache_key: str, available_formats: List[str] = None) ->
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_search_results_keyboard(results: List[Dict[str, Any]], cache_key: str = "", mode: str = "audio") -> InlineKeyboardMarkup:
+def get_search_results_keyboard(
+    results: List[Dict[str, Any]], 
+    cache_key: str = "", 
+    page: int = 0, 
+    page_size: int = 10,
+    mode: str = "audio"
+) -> InlineKeyboardMarkup:
     """
-    Musiqa qidiruvi uchun faqat raqamli tugmalar:
+    Musiqa qidiruvi uchun raqamli tugmalar va [ ⬅️ ] [ ❌ ] [ ➡️ ] navigatsiyasi:
     [ 1 ] [ 2 ] [ 3 ] [ 4 ] [ 5 ]
     [ 6 ] [ 7 ] [ 8 ] [ 9 ] [ 10 ]
+    [ ⬅️ ] [ ❌ ] [ ➡️ ]
     """
+    start_idx = page * page_size
+    page_results = results[start_idx : start_idx + page_size]
+
     prefix = "song:"
     row1 = []
     row2 = []
-    for i, item in enumerate(results, 1):
+    for i, item in enumerate(page_results, start=start_idx + 1):
         btn = InlineKeyboardButton(text=str(i), callback_data=f"{prefix}{item['id']}")
-        if i <= 5:
+        if len(row1) < 5:
             row1.append(btn)
         else:
             row2.append(btn)
+
+    nav_row = [
+        InlineKeyboardButton(text="⬅️", callback_data=f"page:{cache_key}:{page - 1}"),
+        InlineKeyboardButton(text="❌", callback_data="close_search"),
+        InlineKeyboardButton(text="➡️", callback_data=f"page:{cache_key}:{page + 1}")
+    ]
 
     buttons = []
     if row1:
         buttons.append(row1)
     if row2:
         buttons.append(row2)
+    buttons.append(nav_row)
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
